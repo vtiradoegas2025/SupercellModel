@@ -1,0 +1,24 @@
+# TornadoModel 3D Visualization Dependencies
+#
+# Install with: pip install -r requirements.txt
+
+# Core scientific computing
+numpy>=1.20.0
+
+# Data storage and I/O
+zarr>=2.10.0
+
+# OpenGL graphics and windowing
+moderngl>=5.6.0
+moderngl-window>=2.4.0
+
+# Image processing
+Pillow>=8.0.0
+
+# Progress bars
+tqdm>=4.60.0
+
+# Optional: For development and testing
+# pytest>=6.0.0
+# black>=21.0.0
+# flake8>=3.9.0

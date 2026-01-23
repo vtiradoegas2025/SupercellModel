@@ -1,0 +1,592 @@
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <filesystem>
+#include <sstream>
+#include <iomanip>
+#include <cstdio>
+#include <iostream>
+#include <chrono>
+#include <fstream>
+#include <unordered_map>
+#include "simulation.hpp"
+
+
+// Compute Weisman-Klemp style wind profile
+
+
+void compute_wind_profile(const WindProfile& profile, double z, double& u, double& v) {
+    // Heights in meters
+    const double z_sfc = 0.0;
+    const double z_1km = 1000.0;
+        const double z_6km = 6000.0;
+
+    if (z <= z_1km) 
+    {
+        // Linear interpolation from surface to 1km
+        double frac = (z - z_sfc) / (z_1km - z_sfc);
+        u = profile.u_sfc + frac * (profile.u_1km - profile.u_sfc);
+        v = profile.v_sfc + frac * (profile.v_1km - profile.v_sfc);
+    } 
+    else if (z <= z_6km) 
+    {
+        // Linear interpolation from 1km to 6km
+        double frac = (z - z_1km) / (z_6km - z_1km);
+        u = profile.u_1km + frac * (profile.u_6km - profile.u_1km);
+        v = profile.v_1km + frac * (profile.v_6km - profile.v_1km);
+    } 
+    else 
+    {
+        // Constant above 6km
+        u = profile.u_6km;
+        v = profile.v_6km;
+    }
+}
+
+// Simple YAML parser for configuration files
+std::unordered_map<std::string, std::string> parse_yaml_simple(const std::string& filename)
+{
+    std::unordered_map<std::string, std::string> config;
+    std::ifstream file(filename);
+    if (!file.is_open())
+    {
+        std::cerr << "Could not open config file: " << filename << std::endl;
+        return config;
+    }
+
+    std::string line;
+    std::vector<std::string> section_stack;
+    while (std::getline(file, line))
+    {
+        // Remove comments
+        size_t comment_pos = line.find('#');
+        if (comment_pos != std::string::npos)
+        {
+            line = line.substr(0, comment_pos);
+        }
+
+        // Count leading spaces BEFORE trimming
+        size_t indent = 0;
+        while (indent < line.size() && line[indent] == ' ') indent++;
+
+        // Convert spaces to indentation level (assume 2 spaces per level)
+        size_t indent_level = indent / 2;
+
+        // Trim whitespace from line
+        std::string trimmed_line = line;
+        trimmed_line.erase(trimmed_line.begin(), std::find_if(trimmed_line.begin(), trimmed_line.end(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }));
+        trimmed_line.erase(std::find_if(trimmed_line.rbegin(), trimmed_line.rend(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }).base(), trimmed_line.end());
+
+        if (trimmed_line.empty()) continue;
+
+        // Use trimmed line for parsing
+        line = trimmed_line;
+
+        // Check for section headers
+        if (line.back() == ':')
+        {
+            std::string section_name = line.substr(0, line.size() - 1);
+
+            // Adjust section stack based on indentation
+            while (section_stack.size() > indent_level) {
+                section_stack.pop_back();
+            }
+            if (section_stack.size() == indent_level) {
+                section_stack.push_back(section_name);
+            } else {
+                // Replace current level
+                section_stack[indent_level] = section_name;
+            }
+
+            continue;
+        }
+
+        // Parse key-value pairs
+        size_t colon_pos = line.find(':');
+        if (colon_pos != std::string::npos)
+        {
+            std::string key = line.substr(0, colon_pos);
+            std::string value = line.substr(colon_pos + 1);
+
+            // Trim whitespace
+            key.erase(key.begin(), std::find_if(key.begin(), key.end(), [](unsigned char ch) {
+                return !std::isspace(ch);
+            }));
+            key.erase(std::find_if(key.rbegin(), key.rend(), [](unsigned char ch) {
+                return !std::isspace(ch);
+            }).base(), key.end());
+
+            value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch) {
+                return !std::isspace(ch);
+            }));
+            value.erase(std::find_if(value.rbegin(), value.rend(), [](unsigned char ch) {
+                return !std::isspace(ch);
+            }).base(), value.end());
+
+            // Build full key from section stack
+            std::string full_key;
+            for (const auto& section : section_stack) {
+                if (!full_key.empty()) full_key += ".";
+                full_key += section;
+            }
+            if (!full_key.empty()) full_key += ".";
+            full_key += key;
+            config[full_key] = value;
+        }
+    }
+
+    return config;
+}
+
+// Global wind profile for initialization
+WindProfile global_wind_profile = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+// Global CAPE target for thermodynamic profile scaling
+double global_cape_target = 2500.0; // J/kg
+
+// Global microphysics scheme name
+std::string global_microphysics_scheme = "kessler";
+
+// Load configuration from YAML file
+void load_config(const std::string& config_path, int& duration_s, int& write_every_s, std::string& /*outdir*/)
+{
+    if (config_path.empty()) return;
+
+    auto config = parse_yaml_simple(config_path);
+    std::cout << "Loaded config with " << config.size() << " keys" << std::endl;
+
+    // Load duration if specified in config
+    if (config.count("duration_s"))
+    {
+        duration_s = std::stoi(config["duration_s"]);
+    }
+
+    // Load write_every if specified in config
+    if (config.count("output.write_every_s"))
+    {
+        write_every_s = std::stoi(config["output.write_every_s"]);
+    }
+
+    // Load CAPE target for thermodynamic profile scaling
+    if (config.count("environment.cape_target_jkg"))
+    {
+        global_cape_target = std::stod(config["environment.cape_target_jkg"]);
+    }
+
+    // Load nested grid configuration
+    if (config.count("nested.enabled"))
+    {
+        nested_config.enabled = (config["nested.enabled"] == "true");
+    }
+    if (config.count("nested.refinement"))
+    {
+        nested_config.refinement = std::stod(config["nested.refinement"]);
+    }
+    if (config.count("nested.size_r"))
+    {
+        nested_config.nest_size_r = std::stoi(config["nested.size_r"]);
+    }
+    if (config.count("nested.size_th"))
+    {
+        nested_config.nest_size_th = std::stoi(config["nested.size_th"]);
+    }
+    if (config.count("nested.size_z"))
+    {
+        nested_config.nest_size_z = std::stoi(config["nested.size_z"]);
+    }
+
+    // Load grid parameters
+    bool grid_changed = false;
+    std::cout << "Checking for grid.nz key..." << std::endl;
+    if (config.count("grid.nx"))
+    {
+        int new_NR = std::stoi(config["grid.nx"]);
+        if (new_NR != NR) {
+            NR = new_NR;
+            grid_changed = true;
+        }
+    }
+    if (config.count("grid.ny"))
+    {
+        int new_NTH = std::stoi(config["grid.ny"]);
+        if (new_NTH != NTH) {
+            NTH = new_NTH;
+            grid_changed = true;
+        }
+    }
+    if (config.count("grid.nz"))
+    {
+        int new_NZ = std::stoi(config["grid.nz"]);
+        std::cout << "Config loaded NZ: " << new_NZ << " (was " << NZ << ")" << std::endl;
+        if (new_NZ != NZ) {
+            NZ = new_NZ;
+            grid_changed = true;
+        }
+    }
+
+    // Load grid resolution parameters
+    if (config.count("grid.dx"))
+    {
+        dr = std::stod(config["grid.dx"]);
+    }
+    if (config.count("grid.dz"))
+    {
+        dz = std::stod(config["grid.dz"]);
+    }
+    if (config.count("grid.dt"))
+    {
+        dt = std::stod(config["grid.dt"]);
+    }
+
+    // Resize fields if grid changed
+    if (grid_changed) {
+        extern void resize_fields();
+        resize_fields();
+        std::cout << "Grid resized to: " << NR << " x " << NTH << " x " << NZ << std::endl;
+    }
+
+    // Load hodograph parameters
+    if (config.count("environment.hodograph.u_sfc_ms"))
+    {
+        global_wind_profile.u_sfc = std::stod(config["environment.hodograph.u_sfc_ms"]);
+    }
+    if (config.count("environment.hodograph.v_sfc_ms"))
+    {
+        global_wind_profile.v_sfc = std::stod(config["environment.hodograph.v_sfc_ms"]);
+    }
+    if (config.count("environment.hodograph.u_1km_ms"))
+    {
+        global_wind_profile.u_1km = std::stod(config["environment.hodograph.u_1km_ms"]);
+    }
+    if (config.count("environment.hodograph.v_1km_ms"))
+    {
+        global_wind_profile.v_1km = std::stod(config["environment.hodograph.v_1km_ms"]);
+    }
+    if (config.count("environment.hodograph.u_6km_ms"))
+    {
+        global_wind_profile.u_6km = std::stod(config["environment.hodograph.u_6km_ms"]);
+    }
+    if (config.count("environment.hodograph.v_6km_ms"))
+    {
+        global_wind_profile.v_6km = std::stod(config["environment.hodograph.v_6km_ms"]);
+    }
+
+    // Load microphysics scheme
+    if (config.count("microphysics.scheme"))
+    {
+        std::string requested_scheme = config["microphysics.scheme"];
+        // Validate scheme name
+        std::vector<std::string> valid_schemes = {"kessler", "lin", "thompson", "milbrandt"};
+        bool valid = false;
+        for (const auto& scheme : valid_schemes) {
+            if (requested_scheme == scheme) {
+                valid = true;
+                break;
+            }
+        }
+        if (valid) {
+            global_microphysics_scheme = requested_scheme;
+        } else {
+            std::cout << "Warning: Invalid microphysics scheme '" << requested_scheme << "'. Valid options: ";
+            for (size_t i = 0; i < valid_schemes.size(); ++i) {
+                std::cout << valid_schemes[i];
+                if (i < valid_schemes.size() - 1) std::cout << ", ";
+            }
+            std::cout << ". Using default: kessler" << std::endl;
+            global_microphysics_scheme = "kessler";
+        }
+    }
+
+    // Load radiation configuration
+    if (config.count("radiation.scheme"))
+    {
+        global_radiation_config.scheme_id = config["radiation.scheme"];
+    }
+    if (config.count("radiation.do_lw"))
+    {
+        global_radiation_config.do_lw = (config["radiation.do_lw"] == "true");
+    }
+    if (config.count("radiation.do_sw"))
+    {
+        global_radiation_config.do_sw = (config["radiation.do_sw"] == "true");
+    }
+    if (config.count("radiation.dt"))
+    {
+        global_radiation_config.dt_radiation = std::stod(config["radiation.dt"]);
+    }
+    if (config.count("radiation.tau_lw_ref"))
+    {
+        global_radiation_config.tau_lw_ref = std::stod(config["radiation.tau_lw_ref"]);
+    }
+    if (config.count("radiation.tau_sw_ref"))
+    {
+        global_radiation_config.tau_sw_ref = std::stod(config["radiation.tau_sw_ref"]);
+    }
+
+    // Load boundary layer configuration
+    if (config.count("boundary_layer.scheme"))
+    {
+        global_boundary_layer_config.scheme_id = config["boundary_layer.scheme"];
+    }
+    if (config.count("boundary_layer.apply_surface_fluxes"))
+    {
+        global_boundary_layer_config.apply_surface_fluxes = (config["boundary_layer.apply_surface_fluxes"] == "true");
+    }
+    if (config.count("boundary_layer.dt_pbl"))
+    {
+        global_boundary_layer_config.dt_pbl = std::stod(config["boundary_layer.dt_pbl"]);
+    }
+    if (config.count("surface.z0m"))
+    {
+        global_surface_config.z0m = std::stod(config["surface.z0m"]);
+    }
+    if (config.count("surface.z0h"))
+    {
+        global_surface_config.z0h = std::stod(config["surface.z0h"]);
+    }
+
+    // Load turbulence configuration
+    if (config.count("turbulence.scheme"))
+    {
+        global_turbulence_config.scheme_id = config["turbulence.scheme"];
+    }
+    if (config.count("turbulence.dt_sgs"))
+    {
+        global_turbulence_config.dt_sgs = std::stod(config["turbulence.dt_sgs"]);
+    }
+    if (config.count("turbulence.Cs"))
+    {
+        global_turbulence_config.Cs = std::stod(config["turbulence.Cs"]);
+    }
+    if (config.count("turbulence.Pr_t"))
+    {
+        global_turbulence_config.Pr_t = std::stod(config["turbulence.Pr_t"]);
+    }
+
+    // For now, we'll keep the grid parameters fixed
+    // Future enhancement: make grid configurable
+    std::cout << "Loaded configuration from: " << config_path << std::endl;
+    std::cout << "Duration: " << duration_s << "s" << std::endl;
+    std::cout << "Write every: " << write_every_s << "s" << std::endl;
+    std::cout << "CAPE target: " << global_cape_target << " J/kg" << std::endl;
+    std::cout << "Wind profile: SFC(" << global_wind_profile.u_sfc << "," << global_wind_profile.v_sfc
+              << ") 1km(" << global_wind_profile.u_1km << "," << global_wind_profile.v_1km
+              << ") 6km(" << global_wind_profile.u_6km << "," << global_wind_profile.v_6km << ")" << std::endl;
+    std::cout << "Radiation: " << global_radiation_config.scheme_id
+              << " (LW: " << (global_radiation_config.do_lw ? "on" : "off")
+              << ", SW: " << (global_radiation_config.do_sw ? "on" : "off")
+              << ", dt: " << global_radiation_config.dt_radiation << "s)" << std::endl;
+    std::cout << "Boundary Layer: " << global_boundary_layer_config.scheme_id
+              << " (surface fluxes: " << (global_boundary_layer_config.apply_surface_fluxes ? "on" : "off")
+              << ", dt: " << global_boundary_layer_config.dt_pbl << "s)" << std::endl;
+    std::cout << "Turbulence: " << global_turbulence_config.scheme_id
+              << " (Cs: " << global_turbulence_config.Cs
+              << ", dt: " << global_turbulence_config.dt_sgs << "s)" << std::endl;
+}
+
+int main(int argc, char** argv) 
+{
+    // Basic CLI: --headless, --export-ms=N, --duration=SEC, --write-every=SEC, --outdir=PATH, --config=PATH, --export-all
+    bool headless = false;
+    int export_ms = 0;          // GUI auto-export cadence (ms)
+    int duration_s = -1;        // headless run wall-clock duration (s), negative = infinite
+    int write_every_s = 0;      // headless export cadence (s); if >0, write all theta slices periodically
+    std::string outdir = "data/exports";
+    std::string config_path = ""; // path to YAML config file
+    // All fields are now always exported
+
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg == "--headless") headless = true;
+        else if (arg.rfind("--export-ms=", 0) == 0)
+        {
+            export_ms = std::max(0, std::stoi(arg.substr(12)));
+        }
+        else if (arg.rfind("--duration=", 0) == 0)
+        {
+            duration_s = std::stoi(arg.substr(11));
+        }
+        else if (arg.rfind("--write-every=", 0) == 0)
+        {
+            write_every_s = std::max(0, std::stoi(arg.substr(14)));
+        }
+        else if (arg.rfind("--outdir=", 0) == 0)
+        {
+            outdir = arg.substr(9);
+        }
+        else if (arg.rfind("--config=", 0) == 0)
+        {
+            config_path = arg.substr(9);
+        }
+        // --export-all flag removed - all fields are now always exported
+    }
+
+    // Load configuration from YAML file if specified
+    load_config(config_path, duration_s, write_every_s, outdir);
+
+    // Initialize microphysics scheme from config
+    initialize_microphysics(global_microphysics_scheme);
+
+    // Initialize the simulation state once (after grid is resized)
+    initialize();
+
+    // Initialize dynamics scheme (default to tornado for now)
+    initialize_dynamics("supercell");
+
+    // Initialize radiation scheme (default to simple_grey)
+    initialize_radiation("simple_grey");
+
+    // Initialize boundary layer scheme (default to slab)
+    initialize_boundary_layer("slab");
+
+    // Initialize turbulence scheme (default to smagorinsky)
+    initialize_turbulence("smagorinsky");
+
+    // Initialize numerics framework
+    initialize_numerics();
+
+    // Initialize terrain (default to none)
+    initialize_terrain("none");
+
+    if (headless)
+    {
+        // Run a headless loop with optional periodic export
+        const int thetaIndex = 0;
+#ifdef EXPORT_NPY
+        auto save_field_slice_npy = [&](const std::vector<std::vector<std::vector<float>>>& field, int theta, const std::string& filename)
+        {
+            std::vector<float> buf;
+            buf.resize(static_cast<size_t>(NR) * static_cast<size_t>(NZ));
+            size_t idx = 0;
+            for (int k = 0; k < NZ; ++k)
+            {
+                for (int i = 0; i < NR; ++i)
+                {
+                    buf[idx++] = field[i][theta][k];
+                }
+            }
+            std::string header_dict = "{'descr': '<f4', 'fortran_order': False, 'shape': (" + std::to_string(NZ) + ", " + std::to_string(NR) + "), }";
+            size_t header_len = header_dict.size() + 1;
+            const size_t preamble = 6 + 2 + 2;
+            size_t total = preamble + header_len;
+            size_t padding = (16 - (total % 16)) % 16;
+            header_len += padding;
+            std::ofstream out(filename, std::ios::binary);
+            if (out)
+            {
+                out.write("\x93NUMPY", 6);
+                out.put(static_cast<char>(1));
+                out.put(static_cast<char>(0));
+                uint16_t hl = static_cast<uint16_t>(header_len);
+                char lenb[2]; lenb[0] = static_cast<char>(hl & 0xFF); lenb[1] = static_cast<char>((hl >> 8) & 0xFF);
+                out.write(lenb, 2);
+                out.write(header_dict.c_str(), static_cast<std::streamsize>(header_dict.size()));
+                for (size_t i = 0; i < header_len - (header_dict.size() + 1); ++i) out.put(' ');
+                out.put('\n');
+                out.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(buf.size() * sizeof(float)));
+                out.close();
+            }
+        };
+
+        auto write_all_fields = [&](int export_index)
+        {
+            // Create outdir/step_XXXXXX
+            std::ostringstream stepdir;
+            stepdir << outdir << "/step_" << std::setfill('0') << std::setw(6) << export_index;
+            std::filesystem::create_directories(stepdir.str());
+
+            for (int th = 0; th < NTH; ++th)
+            {
+                std::string base_path = stepdir.str() + "/th" + std::to_string(th);
+
+                // Export all fields
+                save_field_slice_npy(u, th, base_path + "_u.npy");
+                save_field_slice_npy(v_theta, th, base_path + "_v.npy");
+                save_field_slice_npy(w, th, base_path + "_w.npy");
+                save_field_slice_npy(rho, th, base_path + "_rho.npy");
+                save_field_slice_npy(p, th, base_path + "_p.npy");
+                save_field_slice_npy(theta, th, base_path + "_theta.npy");
+                save_field_slice_npy(qv, th, base_path + "_qv.npy");
+                save_field_slice_npy(qc, th, base_path + "_qc.npy");
+                save_field_slice_npy(qr, th, base_path + "_qr.npy");
+                save_field_slice_npy(qh, th, base_path + "_qh.npy");
+                save_field_slice_npy(qg, th, base_path + "_qg.npy");
+                save_field_slice_npy(radar_reflectivity, th, base_path + "_radar.npy");
+                save_field_slice_npy(tracer, th, base_path + "_tracer.npy");
+            }
+        };
+
+#endif
+
+        // Ensure output directory exists if periodic writing is requested
+        if (write_every_s > 0)
+        {
+            std::filesystem::create_directories(outdir);
+        }
+
+        auto lastExport = std::chrono::steady_clock::now();
+        auto startRun = std::chrono::steady_clock::now();
+        int steps = 0;
+        int export_index = 0;
+        double simulation_time = 0.0;  // simulation time in seconds
+        while (true)
+        {
+            step_dynamics(simulation_time);
+            simulation_time += dt;  // increment simulation time
+#ifdef EXPORT_NPY
+            // GUI-style ms export (kept for compatibility when headless + --export-ms)
+            if (export_ms > 0)
+            {
+                auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastExport).count() >= export_ms)
+                {
+                    lastExport = now;
+                    // Preserve previous behavior: write a single theta slice (thetaIndex=0) to data/
+                    std::string tmp = std::string("data/.tracer_slice_th0.npy.tmp");
+                    std::string fin = std::string("data/tracer_slice_th0.npy");
+                    save_field_slice_npy(tracer, thetaIndex, tmp);
+                    std::rename(tmp.c_str(), fin.c_str());
+                }
+            }
+            // New: periodic full-theta export in seconds to outdir/step_xxxxxx
+            if (write_every_s > 0)
+            {
+                auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::seconds>(now - lastExport).count() >= write_every_s)
+                {
+                    lastExport = now;
+                    write_all_fields(export_index++);
+                }
+            }
+#endif
+            ++steps;
+            if (steps % 1000 == 0) { /* simple heartbeat */ }
+            if (duration_s >= 0)
+            {
+                auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::seconds>(now - startRun).count() >= duration_s)
+                {
+                    break;
+                }
+            }
+        }
+    }
+    else
+    {
+        // No GUI in default build; if GUI is enabled, delegate.
+        #ifdef ENABLE_GUI
+        run_gui(export_ms);
+        #else
+        (void)export_ms; // unused
+        #endif
+    }
+
+    return 0;
+}
+
+
