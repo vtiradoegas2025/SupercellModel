@@ -20,13 +20,13 @@ private:
     double l_max_ = 500.0;    // maximum mixing length [m]
 
     // Prognostic TKE field
-    std::vector<std::vector<std::vector<float>>> tke_;  // TKE [m²/s²]
+    Field3D tke_;  // TKE [m²/s²]
 
     // Computed fields
-    std::vector<std::vector<std::vector<float>>> nu_t_;     // eddy viscosity
-    std::vector<std::vector<std::vector<float>>> K_theta_;  // temperature diffusivity
-    std::vector<std::vector<std::vector<float>>> K_q_;      // moisture diffusivity
-    std::vector<std::vector<std::vector<float>>> K_tke_;    // TKE diffusivity
+    Field3D nu_t_;     // eddy viscosity
+    Field3D K_theta_;  // temperature diffusivity
+    Field3D K_q_;      // moisture diffusivity
+    Field3D K_tke_;    // TKE diffusivity
 
 public:
     TKEScheme();
@@ -73,7 +73,7 @@ private:
         const TurbulenceConfig& cfg,
         const GridMetrics& grid,
         const TurbulenceStateView& state,
-        std::vector<std::vector<std::vector<float>>>& dtke_dt
+        Field3D& dtke_dt
     );
 
     /*This function computes the TKE production.
@@ -81,8 +81,8 @@ private:
     void compute_tke_production(
         const TurbulenceStateView& state,
         const GridMetrics& grid,
-        const std::vector<std::vector<std::vector<float>>>& nu_t,
-        std::vector<std::vector<std::vector<float>>>& shear_prod,
-        std::vector<std::vector<std::vector<float>>>& buoy_prod
+        const Field3D& nu_t,
+        Field3D& shear_prod,
+        Field3D& buoy_prod
     );
 };

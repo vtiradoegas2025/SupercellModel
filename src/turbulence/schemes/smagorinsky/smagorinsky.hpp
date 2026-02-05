@@ -15,9 +15,9 @@ private:
     double K_max_;           // maximum eddy diffusivity
 
     // Computed fields
-    std::vector<std::vector<std::vector<float>>> nu_t_;     // eddy viscosity
-    std::vector<std::vector<std::vector<float>>> K_theta_;  // temperature diffusivity
-    std::vector<std::vector<std::vector<float>>> K_q_;      // moisture diffusivity
+    Field3D nu_t_;     // eddy viscosity
+    Field3D K_theta_;  // temperature diffusivity
+    Field3D K_q_;      // moisture diffusivity
 
 public:
     /*This function initializes the Smagorinsky turbulence scheme.

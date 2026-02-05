@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <memory>
+#include "field3d.hpp"
 #include "radiation_base.hpp"
 #include "boundary_layer_base.hpp"
 #include "turbulence_base.hpp"
@@ -75,22 +76,22 @@ inline constexpr double S0_solar = 1366.0;   // Solar constant (W/m²)
 extern double simulation_time;  // current simulation time [s]
 
 // Shared fields (defined in equations.cpp for integrated build; in GUI_STANDALONE, tracer is defined in gui.cpp)
-extern std::vector<std::vector<std::vector<float>>> rho;      // [r][th][z]
-extern std::vector<std::vector<std::vector<float>>> p;        // [r][th][z]
-extern std::vector<std::vector<std::vector<float>>> u;        // radial wind [r][th][z]
-extern std::vector<std::vector<std::vector<float>>> w;        // vertical wind [r][th][z]
-extern std::vector<std::vector<std::vector<float>>> v_theta;  // azimuthal wind [r][th][z]
-extern std::vector<std::vector<std::vector<float>>> tracer;   // passive scalar [r][th][z]
+extern Field3D rho;      // [r][th][z]
+extern Field3D p;        // [r][th][z]
+extern Field3D u;        // radial wind [r][th][z]
+extern Field3D w;        // vertical wind [r][th][z]
+extern Field3D v_theta;  // azimuthal wind [r][th][z]
+extern Field3D tracer;   // passive scalar [r][th][z]
 
 // Thermodynamic fields
-extern std::vector<std::vector<std::vector<float>>> theta;    // potential temperature [r][th][z] (K)
-extern std::vector<std::vector<std::vector<float>>> qv;       // water vapor mixing ratio [r][th][z] (kg/kg)
-extern std::vector<std::vector<std::vector<float>>> qc;       // cloud water mixing ratio [r][th][z] (kg/kg)
-extern std::vector<std::vector<std::vector<float>>> qr;       // rain water mixing ratio [r][th][z] (kg/kg)
-extern std::vector<std::vector<std::vector<float>>> qi;       // cloud ice mixing ratio [r][th][z] (kg/kg)
-extern std::vector<std::vector<std::vector<float>>> qs;       // snow mixing ratio [r][th][z] (kg/kg)
-extern std::vector<std::vector<std::vector<float>>> qh;       // hail mixing ratio [r][th][z] (kg/kg)
-extern std::vector<std::vector<std::vector<float>>> qg;       // graupel mixing ratio [r][th][z] (kg/kg)
+extern Field3D theta;    // potential temperature [r][th][z] (K)
+extern Field3D qv;       // water vapor mixing ratio [r][th][z] (kg/kg)
+extern Field3D qc;       // cloud water mixing ratio [r][th][z] (kg/kg)
+extern Field3D qr;       // rain water mixing ratio [r][th][z] (kg/kg)
+extern Field3D qi;       // cloud ice mixing ratio [r][th][z] (kg/kg)
+extern Field3D qs;       // snow mixing ratio [r][th][z] (kg/kg)
+extern Field3D qh;       // hail mixing ratio [r][th][z] (kg/kg)
+extern Field3D qg;       // graupel mixing ratio [r][th][z] (kg/kg)
 
 // Wind profile for hodograph initialization
 struct WindProfile 
@@ -117,54 +118,54 @@ struct NestedGridConfig
 extern NestedGridConfig nested_config;
 
 // Nested grid fields (subset of main grid with higher resolution)
-extern std::vector<std::vector<std::vector<float>>> nest_rho;
-extern std::vector<std::vector<std::vector<float>>> nest_p;
-extern std::vector<std::vector<std::vector<float>>> nest_u;
-extern std::vector<std::vector<std::vector<float>>> nest_w;
-extern std::vector<std::vector<std::vector<float>>> nest_v_theta;
-extern std::vector<std::vector<std::vector<float>>> nest_theta;
-extern std::vector<std::vector<std::vector<float>>> nest_qv;
-extern std::vector<std::vector<std::vector<float>>> nest_qc;
-extern std::vector<std::vector<std::vector<float>>> nest_qr;
-extern std::vector<std::vector<std::vector<float>>> nest_qh;
-extern std::vector<std::vector<std::vector<float>>> nest_qg;
-extern std::vector<std::vector<std::vector<float>>> nest_tracer;
+extern Field3D nest_rho;
+extern Field3D nest_p;
+extern Field3D nest_u;
+extern Field3D nest_w;
+extern Field3D nest_v_theta;
+extern Field3D nest_theta;
+extern Field3D nest_qv;
+extern Field3D nest_qc;
+extern Field3D nest_qr;
+extern Field3D nest_qh;
+extern Field3D nest_qg;
+extern Field3D nest_tracer;
 
 // Radar reflectivity field
-extern std::vector<std::vector<std::vector<float>>> radar_reflectivity;
+extern Field3D radar_reflectivity;
 
 // Dynamics scheme
 extern std::unique_ptr<DynamicsScheme> dynamics_scheme;
 
 // Vorticity diagnostic fields
-extern std::vector<std::vector<std::vector<float>>> vorticity_r;
-extern std::vector<std::vector<std::vector<float>>> vorticity_theta;
-extern std::vector<std::vector<std::vector<float>>> vorticity_z;
-extern std::vector<std::vector<std::vector<float>>> stretching_term;
-extern std::vector<std::vector<std::vector<float>>> tilting_term;
-extern std::vector<std::vector<std::vector<float>>> baroclinic_term;
+extern Field3D vorticity_r;
+extern Field3D vorticity_theta;
+extern Field3D vorticity_z;
+extern Field3D stretching_term;
+extern Field3D tilting_term;
+extern Field3D baroclinic_term;
 
 // Angular momentum diagnostics (for tornado dynamics)
-extern std::vector<std::vector<std::vector<float>>> angular_momentum;
-extern std::vector<std::vector<std::vector<float>>> angular_momentum_tendency;
+extern Field3D angular_momentum;
+extern Field3D angular_momentum_tendency;
 
 // Pressure diagnostics
-extern std::vector<std::vector<std::vector<float>>> p_prime;
-extern std::vector<std::vector<std::vector<float>>> dynamic_pressure;
-extern std::vector<std::vector<std::vector<float>>> buoyancy_pressure;
+extern Field3D p_prime;
+extern Field3D dynamic_pressure;
+extern Field3D buoyancy_pressure;
 
 // Radiation fields
-extern std::vector<std::vector<std::vector<float>>> dtheta_dt_rad;  // radiation tendency
+extern Field3D dtheta_dt_rad;  // radiation tendency
 
 // Boundary layer fields
-extern std::vector<std::vector<std::vector<float>>> dtheta_dt_pbl;  // PBL theta tendency
-extern std::vector<std::vector<std::vector<float>>> dqv_dt_pbl;     // PBL moisture tendency
-extern std::vector<std::vector<std::vector<float>>> du_dt_pbl;      // PBL u-wind tendency
-extern std::vector<std::vector<std::vector<float>>> dv_dt_pbl;      // PBL v-wind tendency
-extern std::vector<std::vector<std::vector<float>>> dtke_dt_pbl;    // PBL TKE tendency
+extern Field3D dtheta_dt_pbl;  // PBL theta tendency
+extern Field3D dqv_dt_pbl;     // PBL moisture tendency
+extern Field3D du_dt_pbl;      // PBL u-wind tendency
+extern Field3D dv_dt_pbl;      // PBL v-wind tendency
+extern Field3D dtke_dt_pbl;    // PBL TKE tendency
 
 // TKE field (for MYNN scheme)
-extern std::vector<std::vector<std::vector<float>>> tke;
+extern Field3D tke;
 extern RadiationConfig global_radiation_config;
 
 // Boundary layer configuration
@@ -179,12 +180,22 @@ extern GridMetrics global_grid_metrics;
 extern AdvectionConfig global_advection_config;
 extern DiffusionConfig global_diffusion_config;
 extern TimeSteppingConfig global_time_stepping_config;
+extern std::unique_ptr<AdvectionSchemeBase> advection_scheme;
+
+// Chaos configuration (defined in src/chaos/chaos.cpp)
+namespace chaos {
+    class ChaosConfig;
+}
+extern chaos::ChaosConfig global_chaos_config;
+
+// Terrain configuration (defined in src/terrain.cpp)
+extern TerrainConfig global_terrain_config;
 
 // Simulation API
 void initialize();
 void resize_fields();
-void advect_tracer(double dt_advect);
-void advect_thermodynamics(double dt_advect);
+void advect_tracer(double dt_advect);  // Uses new advection component internally
+void advect_thermodynamics(double dt_advect);  // Uses new advection component internally
 void step_microphysics(double dt_micro);
 void step_dynamics();
 void apply_boundary_conditions();

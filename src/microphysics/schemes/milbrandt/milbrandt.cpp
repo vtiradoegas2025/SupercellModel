@@ -1,6 +1,9 @@
 #include "milbrandt.hpp"
 #include <algorithm>
 #include <cmath>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include <limits>
 
 /*This constructor initializes the Milbrandt scheme with default parameters.
@@ -29,32 +32,32 @@ Takes in the pressure, potential temperature, vapor mixing ratio, cloud water mi
 rainwater mixing ratio, ice mixing ratio, snow mixing ratio, graupel mixing ratio, hail mixing ratio,
 and the time step and computes the tendencies for the Milbrandt scheme.*/
 void MilbrandtScheme::compute_tendencies(
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& theta,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
+    const Field3D& p,
+    const Field3D& theta,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
     double dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqi_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt
+    Field3D& dtheta_dt,
+    Field3D& dqv_dt,
+    Field3D& dqc_dt,
+    Field3D& dqr_dt,
+    Field3D& dqi_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt
 ) 
 
 {
     // Get the number of rows, columns, and levels.
-    int NR = p.size();
+    int NR = p.size_r();
     if (NR == 0) return;
-    int NTH = p[0].size();
-    int NZ = p[0][0].size();
+    int NTH = p.size_th();
+    int NZ = p.size_z();
 
     // Initialize prognostic fields if not already done
     if (Nr_.empty()) 
@@ -63,13 +66,14 @@ void MilbrandtScheme::compute_tendencies(
     }
 
     // Convert theta to temperature
-    std::vector<std::vector<std::vector<float>>> temperature;
+    Field3D temperature(NR, NTH, NZ);
     thermodynamics::convert_theta_to_temperature_field(theta, p, temperature);
 
     // Calculate air density
-    std::vector<std::vector<std::vector<float>>> rho(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    Field3D rho(NR, NTH, NZ);
 
     // Iterate over all grid points to calculate the air density.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -79,26 +83,26 @@ void MilbrandtScheme::compute_tendencies(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Calculate the air density.
-                rho[i][j][k] = p[i][j][k] / (287.0 * temperature[i][j][k] * (1.0 + 0.608 * qv[i][j][k]));
+                rho[i][j][k] = static_cast<float>(p[i][j][k]) / (287.0f * static_cast<float>(temperature[i][j][k]) * (1.0f + 0.608f * static_cast<float>(qv[i][j][k])));
             }
         }
     }
 
     // Initialize tendency arrays
-    dtheta_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqv_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqc_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqr_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqi_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqs_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqg_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqh_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    dtheta_dt.resize(NR, NTH, NZ, 0.0f);
+    dqv_dt.resize(NR, NTH, NZ, 0.0f);
+    dqc_dt.resize(NR, NTH, NZ, 0.0f);
+    dqr_dt.resize(NR, NTH, NZ, 0.0f);
+    dqi_dt.resize(NR, NTH, NZ, 0.0f);
+    dqs_dt.resize(NR, NTH, NZ, 0.0f);
+    dqg_dt.resize(NR, NTH, NZ, 0.0f);
+    dqh_dt.resize(NR, NTH, NZ, 0.0f);
 
-    dNr_dt_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dNi_dt_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dNs_dt_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dNg_dt_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dNh_dt_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    dNr_dt_.resize(NR, NTH, NZ, 0.0f);
+    dNi_dt_.resize(NR, NTH, NZ, 0.0f);
+    dNs_dt_.resize(NR, NTH, NZ, 0.0f);
+    dNg_dt_.resize(NR, NTH, NZ, 0.0f);
+    dNh_dt_.resize(NR, NTH, NZ, 0.0f);
 
     // Compute microphysical processes
     compute_warm_rain_processes(temperature, p, rho, qv, qc, qr,
@@ -117,6 +121,7 @@ void MilbrandtScheme::compute_tendencies(
                          dNr_dt_, dNs_dt_, dNg_dt_, dNh_dt_);
 
     // Iterate over all grid points and update prognostic number concentrations
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -133,16 +138,17 @@ void MilbrandtScheme::compute_tendencies(
                 Nh_[i][j][k] += dNh_dt_[i][j][k] * dt;
 
                 // Ensure positive values
-                Nr_[i][j][k] = std::max(Nr_[i][j][k], 1.0f);
-                Ni_[i][j][k] = std::max(Ni_[i][j][k], 1.0f);
-                Ns_[i][j][k] = std::max(Ns_[i][j][k], 1.0f);
-                Ng_[i][j][k] = std::max(Ng_[i][j][k], 1.0f);
-                Nh_[i][j][k] = std::max(Nh_[i][j][k], 1.0f);
+                Nr_[i][j][k] = std::max(static_cast<float>(Nr_[i][j][k]), 1.0f);
+                Ni_[i][j][k] = std::max(static_cast<float>(Ni_[i][j][k]), 1.0f);
+                Ns_[i][j][k] = std::max(static_cast<float>(Ns_[i][j][k]), 1.0f);
+                Ng_[i][j][k] = std::max(static_cast<float>(Ng_[i][j][k]), 1.0f);
+                Nh_[i][j][k] = std::max(static_cast<float>(Nh_[i][j][k]), 1.0f);
             }
         }
     }
 
     // Iterate over all grid points and convert temperature tendencies to potential temperature tendencies
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points 
@@ -154,7 +160,7 @@ void MilbrandtScheme::compute_tendencies(
                 // Convert temperature tendencies to potential temperature tendencies
                 dtheta_dt[i][j][k] = static_cast<float>(
                     thermodynamics::temperature_tendency_to_theta(
-                        dtheta_dt[i][j][k], theta[i][j][k], p[i][j][k]
+                        static_cast<float>(dtheta_dt[i][j][k]), static_cast<float>(theta[i][j][k]), static_cast<float>(p[i][j][k])
                     )
                 );
             }
@@ -167,20 +173,20 @@ Takes in the number of rows, columns, and levels and initializes the prognostic 
 void MilbrandtScheme::initialize_prognostic_fields(int NR, int NTH, int NZ) 
 {
     // Initialize number concentrations with reasonable defaults
-    Nr_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1e6)));   // rain
-    Ni_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1e5)));   // ice
-    Ns_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1e5)));   // snow
-    Ng_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1e4)));   // graupel
-    Nh_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1e3)));   // hail
+    Nr_.resize(NR, NTH, NZ, 1e6f);   // rain
+    Ni_.resize(NR, NTH, NZ, 1e5f);   // ice
+    Ns_.resize(NR, NTH, NZ, 1e5f);   // snow
+    Ng_.resize(NR, NTH, NZ, 1e4f);   // graupel
+    Nh_.resize(NR, NTH, NZ, 1e3f);   // hail
 
     // If triple moment is enabled, initialize the triple moment fields
     if (triple_moment_) 
     {
-        Zr_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1.0)));
-        Zi_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1.0)));
-        Zs_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1.0)));
-        Zg_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1.0)));
-        Zh_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 1.0)));
+        Zr_.resize(NR, NTH, NZ, 1.0f);
+        Zi_.resize(NR, NTH, NZ, 1.0f);
+        Zs_.resize(NR, NTH, NZ, 1.0f);
+        Zg_.resize(NR, NTH, NZ, 1.0f);
+        Zh_.resize(NR, NTH, NZ, 1.0f);
     }
 }
 
@@ -232,24 +238,25 @@ double MilbrandtScheme::calculate_reflectivity(double q, double Nt, double alpha
 // It computes the warm rain processes by iterating over all grid points
 // and computing the warm rain processes using the compute_warm_rain_processes function*/
 void MilbrandtScheme::compute_warm_rain_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& rho,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-    std::vector<std::vector<std::vector<float>>>& dNr_dt
+    const Field3D& temperature,
+    const Field3D& p,
+    const Field3D& rho,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    Field3D& dqc_dt,
+    Field3D& dqr_dt,
+    Field3D& dqv_dt,
+    Field3D& dtheta_dt,
+    Field3D& dNr_dt
 ) 
 {
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points and compute warm rain processes
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -259,13 +266,13 @@ void MilbrandtScheme::compute_warm_rain_processes(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qc_val = qc[i][j][k];
-                float qr_val = qr[i][j][k];
-                float qv_val = qv[i][j][k];
-                float T = temperature[i][j][k];
-                float P = p[i][j][k];
-                float rho_val = rho[i][j][k];
-                float Nr_val = Nr_[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
+                float P = static_cast<float>(p[i][j][k]);
+                float rho_val = static_cast<float>(rho[i][j][k]);
+                float Nr_val = static_cast<float>(Nr_[i][j][k]);
 
                 // If the cloud water mixing ratio is greater than the autoconversion threshold, compute the autoconversion rate.
                 if (qc_val > qc0_) 
@@ -328,33 +335,34 @@ ice mixing ratio, snow mixing ratio, graupel mixing ratio, hail mixing ratio,
 and the tendencies for the cloud water, ice, snow, graupel, hail, and vapor mixing ratios
 and computes the ice processes for the Milbrandt scheme.*/
 void MilbrandtScheme::compute_ice_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& rho,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqi_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-    std::vector<std::vector<std::vector<float>>>& dNi_dt,
-    std::vector<std::vector<std::vector<float>>>& dNs_dt,
-    std::vector<std::vector<std::vector<float>>>& dNg_dt,
-    std::vector<std::vector<std::vector<float>>>& dNh_dt
+    const Field3D& temperature,
+    const Field3D& p,
+    const Field3D& rho,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqc_dt,
+    Field3D& dqi_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dqv_dt,
+    Field3D& dtheta_dt,
+    Field3D& dNi_dt,
+    Field3D& dNs_dt,
+    Field3D& dNg_dt,
+    Field3D& dNh_dt
 ) 
 {
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points and compute ice processes
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -363,20 +371,20 @@ void MilbrandtScheme::compute_ice_processes(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qc_val = qc[i][j][k];
-                float qi_val = qi[i][j][k];
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
-                float qv_val = qv[i][j][k];
-                float T = temperature[i][j][k];
-                float P = p[i][j][k];
-                float rho_val = rho[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qi_val = static_cast<float>(qi[i][j][k]);
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
+                float P = static_cast<float>(p[i][j][k]);
+                float rho_val = static_cast<float>(rho[i][j][k]);
 
-                float Ni_val = Ni_[i][j][k];
-                float Ns_val = Ns_[i][j][k];
-                float Ng_val = Ng_[i][j][k];
-                float Nh_val = Nh_[i][j][k];
+                float Ni_val = static_cast<float>(Ni_[i][j][k]);
+                float Ns_val = static_cast<float>(Ns_[i][j][k]);
+                float Ng_val = static_cast<float>(Ng_[i][j][k]);
+                float Nh_val = static_cast<float>(Nh_[i][j][k]);
 
                 // If the cloud water mixing ratio is greater than 0 and the temperature is less than the freezing temperature 
                 // and the ice number concentration is less than 1e6, compute the ice nucleation rate.(Simplified)
@@ -448,26 +456,27 @@ void MilbrandtScheme::compute_ice_processes(
 // It computes the melting processes by iterating over all grid points
 // and computing the melting processes using the compute_melting_processes function*/
 void MilbrandtScheme::compute_melting_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-    std::vector<std::vector<std::vector<float>>>& dNr_dt,
-    std::vector<std::vector<std::vector<float>>>& dNs_dt,
-    std::vector<std::vector<std::vector<float>>>& dNg_dt,
-    std::vector<std::vector<std::vector<float>>>& dNh_dt
+    const Field3D& temperature,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dqr_dt,
+    Field3D& dtheta_dt,
+    Field3D& dNr_dt,
+    Field3D& dNs_dt,
+    Field3D& dNg_dt,
+    Field3D& dNh_dt
 ) 
 {
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points and compute melting processes
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -477,13 +486,13 @@ void MilbrandtScheme::compute_melting_processes(
             for (int k = 0; k < NZ; ++k)
             {
                 // Get hydrometeor values
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
-                float T = temperature[i][j][k];
-                float Ns_val = Ns_[i][j][k];
-                float Ng_val = Ng_[i][j][k];
-                float Nh_val = Nh_[i][j][k];
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
+                float Ns_val = static_cast<float>(Ns_[i][j][k]);
+                float Ng_val = static_cast<float>(Ng_[i][j][k]);
+                float Nh_val = static_cast<float>(Nh_[i][j][k]);
 
                 // If temperature is above freezing, compute melting processes
                 if (T > microphysics_constants::T0) 
@@ -536,31 +545,32 @@ Takes in the rainwater mixing ratio, snow mixing ratio, graupel mixing ratio, ha
 and the tendencies for the rainwater, snow, graupel, and hail mixing ratios
 and computes the sedimentation for the Milbrandt scheme.*/
 void MilbrandtScheme::compute_sedimentation(
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    const std::vector<std::vector<std::vector<float>>>& Nr,
-    const std::vector<std::vector<std::vector<float>>>& Ns,
-    const std::vector<std::vector<std::vector<float>>>& Ng,
-    const std::vector<std::vector<std::vector<float>>>& Nh,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dNr_dt,
-    std::vector<std::vector<std::vector<float>>>& dNs_dt,
-    std::vector<std::vector<std::vector<float>>>& dNg_dt,
-    std::vector<std::vector<std::vector<float>>>& dNh_dt
+    const Field3D& qr,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    const Field3D& Nr,
+    const Field3D& Ns,
+    const Field3D& Ng,
+    const Field3D& Nh,
+    Field3D& dqr_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dNr_dt,
+    Field3D& dNs_dt,
+    Field3D& dNg_dt,
+    Field3D& dNh_dt
 ) 
 {
     // Get the number of rows, columns, and levels.
-    int NR = qr.size();
-    int NTH = qr[0].size();
-    int NZ = qr[0][0].size();
+    int NR = qr.size_r();
+    int NTH = qr.size_th();
+    int NZ = qr.size_z();
     const double dz = 100.0;
 
     // Iterate over all grid points and compute sedimentation
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -570,10 +580,12 @@ void MilbrandtScheme::compute_sedimentation(
             for (int k = 0; k < NZ; ++k) 
             {
                 // If the rainwater mixing ratio is greater than 0 and the vertical level is greater than 0, compute the sedimentation rate.
-                if (qr[i][j][k] > 0.0f && k > 0) 
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float Nr_val = static_cast<float>(Nr[i][j][k]);
+                if (qr_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    double Vt = sedimentation_rate(qr[i][j][k], Nr[i][j][k], alpha_r_, c_r_, d_r_, dz);
+                    double Vt = sedimentation_rate(qr_val, Nr_val, alpha_r_, c_r_, d_r_, dz);
                     dqr_dt[i][j][k] -= Vt;
 
                     // If the vertical level is less than the number of levels minus 1, compute the sedimentation rate for the next level.
@@ -585,10 +597,12 @@ void MilbrandtScheme::compute_sedimentation(
                 }
 
                 // If the snow mixing ratio is greater than 0 and the vertical level is greater than 0, compute the sedimentation rate.
-                if (qs[i][j][k] > 0.0f && k > 0) 
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float Ns_val = static_cast<float>(Ns[i][j][k]);
+                if (qs_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    double Vt = sedimentation_rate(qs[i][j][k], Ns[i][j][k], alpha_s_, c_s_, d_s_, dz);
+                    double Vt = sedimentation_rate(qs_val, Ns_val, alpha_s_, c_s_, d_s_, dz);
                     dqs_dt[i][j][k] -= Vt;
 
                     // If the vertical level is less than the number of levels minus 1, compute the sedimentation rate for the next level.
@@ -600,10 +614,12 @@ void MilbrandtScheme::compute_sedimentation(
                 }
 
                 // If the graupel mixing ratio is greater than 0 and the vertical level is greater than 0, compute the sedimentation rate.
-                if (qg[i][j][k] > 0.0f && k > 0) 
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float Ng_val = static_cast<float>(Ng[i][j][k]);
+                if (qg_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    double Vt = sedimentation_rate(qg[i][j][k], Ng[i][j][k], alpha_g_, c_g_, d_g_, dz);
+                    double Vt = sedimentation_rate(qg_val, Ng_val, alpha_g_, c_g_, d_g_, dz);
                     dqg_dt[i][j][k] -= Vt;
                     if (k < NZ - 1) dqg_dt[i][j][k + 1] += Vt;
                     dNg_dt[i][j][k] -= Vt / (c_g_ * pow(1e-3, d_g_));
@@ -612,9 +628,11 @@ void MilbrandtScheme::compute_sedimentation(
 
                 // If the hail mixing ratio is greater than 0 and the vertical level is greater than 0 and the hail processes flag is true, 
                 // compute the sedimentation rate.
-                if (qh[i][j][k] > 0.0f && k > 0 && hail_processes_) 
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                float Nh_val = static_cast<float>(Nh[i][j][k]);
+                if (qh_val > 0.0f && k > 0 && hail_processes_) 
                 {
-                    double Vt = sedimentation_rate(qh[i][j][k], Nh[i][j][k], alpha_h_, c_h_, d_h_, dz);
+                    double Vt = sedimentation_rate(qh_val, Nh_val, alpha_h_, c_h_, d_h_, dz);
                     dqh_dt[i][j][k] -= Vt;
 
                     // If the vertical level is less than the number of levels minus 1, compute the sedimentation rate for the next level.
@@ -634,25 +652,26 @@ Takes in the cloud water mixing ratio, rainwater mixing ratio, ice mixing ratio,
 graupel mixing ratio, hail mixing ratio, and the radar reflectivity field
 and computes the radar reflectivity for the Milbrandt scheme.*/
 void MilbrandtScheme::compute_radar_reflectivity(
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& reflectivity_dbz
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& reflectivity_dbz
 ) 
 {
     // Get the number of rows, columns, and levels.
-    int NR = qc.size();
+    int NR = qc.size_r();
     if (NR == 0) return;
-    int NTH = qc[0].size();
-    int NZ = qc[0][0].size();
+    int NTH = qc.size_th();
+    int NZ = qc.size_z();
 
-    reflectivity_dbz.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    reflectivity_dbz.resize(NR, NTH, NZ, 0.0f);
 
     // Iterate over all grid points and compute radar reflectivity and use prognostic 
     // reflectivity if triple-moment, otherwise calculate
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
 
@@ -667,37 +686,47 @@ void MilbrandtScheme::compute_radar_reflectivity(
 
                 // If the rainwater mixing ratio is greater than 0 and the rainwater number concentration is greater than 0, 
                 // compute the reflectivity for the rain.
-                if (qr[i][j][k] > 0.0f && Nr_[i][j][k] > 0.0f) 
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float Nr_val = static_cast<float>(Nr_[i][j][k]);
+                if (qr_val > 0.0f && Nr_val > 0.0f) 
                 {
-                    Z_total += calculate_reflectivity(qr[i][j][k], Nr_[i][j][k], alpha_r_, c_r_, d_r_);
+                    Z_total += calculate_reflectivity(qr_val, Nr_val, alpha_r_, c_r_, d_r_);
                 }
 
                 // If the ice mixing ratio is greater than 0 and the ice number concentration is greater than 0, 
                 // compute the reflectivity for the ice.
-                if (qi[i][j][k] > 0.0f && Ni_[i][j][k] > 0.0f) 
+                float qi_val = static_cast<float>(qi[i][j][k]);
+                float Ni_val = static_cast<float>(Ni_[i][j][k]);
+                if (qi_val > 0.0f && Ni_val > 0.0f) 
                 {
-                    Z_total += calculate_reflectivity(qi[i][j][k], Ni_[i][j][k], alpha_i_, c_i_, d_i_);
+                    Z_total += calculate_reflectivity(qi_val, Ni_val, alpha_i_, c_i_, d_i_);
                 }
 
                 // If the snow mixing ratio is greater than 0 and the snow number concentration is greater than 0, 
                 // compute the reflectivity for the snow.
-                if (qs[i][j][k] > 0.0f && Ns_[i][j][k] > 0.0f) 
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float Ns_val = static_cast<float>(Ns_[i][j][k]);
+                if (qs_val > 0.0f && Ns_val > 0.0f) 
                 {
-                    Z_total += calculate_reflectivity(qs[i][j][k], Ns_[i][j][k], alpha_s_, c_s_, d_s_);
+                    Z_total += calculate_reflectivity(qs_val, Ns_val, alpha_s_, c_s_, d_s_);
                 }
 
                 // If the graupel mixing ratio is greater than 0 and the graupel number concentration is greater than 0, 
                 // compute the reflectivity for the graupel.
-                if (qg[i][j][k] > 0.0f && Ng_[i][j][k] > 0.0f) 
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float Ng_val = static_cast<float>(Ng_[i][j][k]);
+                if (qg_val > 0.0f && Ng_val > 0.0f) 
                 {
-                    Z_total += calculate_reflectivity(qg[i][j][k], Ng_[i][j][k], alpha_g_, c_g_, d_g_);
+                    Z_total += calculate_reflectivity(qg_val, Ng_val, alpha_g_, c_g_, d_g_);
                 }
 
                 // If the hail mixing ratio is greater than 0 and the hail number concentration is greater than 0 and 
                 // the hail processes flag is true, compute the reflectivity for the hail.
-                if (qh[i][j][k] > 0.0f && Nh_[i][j][k] > 0.0f && hail_processes_) 
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                float Nh_val = static_cast<float>(Nh_[i][j][k]);
+                if (qh_val > 0.0f && Nh_val > 0.0f && hail_processes_) 
                 {
-                    Z_total += calculate_reflectivity(qh[i][j][k], Nh_[i][j][k], alpha_h_, c_h_, d_h_);
+                    Z_total += calculate_reflectivity(qh_val, Nh_val, alpha_h_, c_h_, d_h_);
                 }
 
                 // If the total reflectivity is greater than 1e-10, compute the reflectivity in dBZ.

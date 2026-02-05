@@ -1,5 +1,6 @@
 #include "simulation.hpp"
 #include "factory.hpp"
+#include "field3d.hpp"
 #include <iostream>
 #include <memory>
 
@@ -8,11 +9,28 @@ It manages stochastic perturbations for ensemble-style sensitivity experiments
 and "chaos seeding" for storm predictability studies in convection-permitting setups.
 */
 
+// Simple SimulationState wrapper for chaos perturbations
+// This is a temporary solution until proper SimulationState interface is implemented
+struct SimulationState {
+    // References to global simulation fields
+    Field3D* u;
+    Field3D* v_theta;
+    Field3D* w;
+    Field3D* theta;
+    Field3D* qv;
+    Field3D* qc;
+    Field3D* qr;
+    
+    SimulationState() 
+        : u(&::u), v_theta(&::v_theta), w(&::w), theta(&::theta), 
+          qv(&::qv), qc(&::qc), qr(&::qr) {}
+};
+
 // Global chaos scheme instance
 std::unique_ptr<chaos::ChaosScheme> chaos_scheme = nullptr;
 
 // Global chaos configuration
-chaos::ChaosConfig global_chaos_config;
+chaos::ChaosConfig global_chaos_config;  // Defined here, declared extern in simulation.hpp
 
 // Chaos diagnostics
 chaos::ChaosDiagnostics global_chaos_diagnostics;
@@ -27,10 +45,23 @@ void initialize_chaos(const chaos::ChaosConfig& cfg)
         global_chaos_config = cfg;
         chaos_scheme = create_chaos_scheme(cfg.scheme_id);
 
-        // Initialize with grid metrics (will be set after grid initialization)
-        // For now, create a dummy grid - will be properly initialized later
-        GridMetrics dummy_grid;
-        chaos_scheme->initialize(cfg, dummy_grid);
+        // Initialize with actual grid metrics (should be set by initialize_numerics() first)
+        // If grid metrics not yet initialized, use defaults
+        if (global_grid_metrics.dx > 0.0) {
+            chaos_scheme->initialize(cfg, global_grid_metrics);
+        } else {
+            // Fallback: create grid metrics from global grid variables
+            GridMetrics grid;
+            grid.dx = dr;
+            grid.dy = dtheta * 1000.0;  // approximate arc length
+            grid.dz.assign(NZ, dz);
+            grid.z_int.resize(NZ + 1);
+            grid.z_int[0] = 0.0;
+            for (int k = 1; k <= NZ; ++k) {
+                grid.z_int[k] = grid.z_int[k-1] + dz;
+            }
+            chaos_scheme->initialize(cfg, grid);
+        }
 
         std::cout << "Initialized chaos scheme: " << cfg.scheme_id << std::endl;
 
@@ -91,20 +122,13 @@ void apply_chaos_initial_conditions()
         state_view.qr = &qr;
 
         // Apply perturbations (state is modified in-place)
-        // TODO: Proper SimulationState interface
-        // This is a COMEBACK SECTION - using null pointer placeholder for initial integration
-        //
-        // Full implementation should:
-        // 1. Create proper SimulationState object with references to global fields
-        // 2. Or modify scheme interface to work with global variables directly
-        // 3. Ensure thread safety and proper state management
-        //
-        // Current limitation: Scheme interface expects SimulationState but globals are used directly
-
+        // Create SimulationState wrapper with references to global fields
+        SimulationState sim_state;
+        
         chaos_scheme->apply_initial_conditions(
             global_chaos_config,
             global_grid_metrics,
-            *(SimulationState*)nullptr,  // TODO: Replace with proper state object
+            sim_state,
             &global_chaos_diagnostics
         );
 
@@ -117,6 +141,28 @@ void apply_chaos_initial_conditions()
                 std::cout << "  " << warning << std::endl;
             }
         }
+        
+        // Debug: Check values after chaos perturbations
+        float theta_min = 1e10, theta_max = -1e10;
+        int nan_count = 0, inf_count = 0;
+        for (int i = 0; i < NR; ++i) {
+            for (int j = 0; j < NTH; ++j) {
+                for (int k = 0; k < NZ; ++k) {
+                    float theta_val = theta[i][j][k];
+                    if (std::isnan(theta_val)) nan_count++;
+                    if (std::isinf(theta_val)) inf_count++;
+                    if (theta_val < theta_min) theta_min = theta_val;
+                    if (theta_val > theta_max) theta_max = theta_val;
+                }
+            }
+        }
+        std::cout << "\n[CHAOS DEBUG] After chaos perturbations:" << std::endl;
+        std::cout << "  Theta: min=" << theta_min << "K, max=" << theta_max << "K" << std::endl;
+        std::cout << "  NaN count: " << nan_count << ", Inf count: " << inf_count << std::endl;
+        if (theta_min < 0 || theta_max > 500) {
+            std::cerr << "  ⚠️  WARNING: Theta corrupted by chaos perturbations!" << std::endl;
+        }
+        std::cout << std::endl;
 
     }
     catch (const std::exception& e) 

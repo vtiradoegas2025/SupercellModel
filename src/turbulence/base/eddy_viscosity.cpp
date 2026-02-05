@@ -1,6 +1,9 @@
 #include "eddy_viscosity.hpp"
 #include <cmath>
 #include <algorithm>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 /*This file contains the implementation of the eddy viscosity.
 It manages the computation of the eddy viscosity.*/
@@ -25,54 +28,96 @@ StrainRate compute_strain_rate_3d(
 
     // Velocity gradients (centered differences where possible)
     // du/dx
-    double dudx = (i > 0 && i < state.NR - 1) ?
-        ((*state.u)[i+1][j][k] - (*state.u)[i-1][j][k]) / (2.0 * dx) :
-        ((*state.u)[i+1][j][k] - (*state.u)[i][j][k]) / dx;
+    double dudx;
+    if (i > 0 && i < state.NR - 1) {
+        dudx = ((*state.u)[i+1][j][k] - (*state.u)[i-1][j][k]) / (2.0 * dx);
+    } else if (i == 0) {
+        dudx = ((*state.u)[i+1][j][k] - (*state.u)[i][j][k]) / dx;
+    } else { // i == state.NR - 1
+        dudx = ((*state.u)[i][j][k] - (*state.u)[i-1][j][k]) / dx;
+    }
 
     // du/dy
-    double dudy = (j > 0 && j < state.NTH - 1) ?
-        ((*state.u)[i][j+1][k] - (*state.u)[i][j-1][k]) / (2.0 * dy) :
-        ((*state.u)[i][j+1][k] - (*state.u)[i][j][k]) / dy;
+    double dudy;
+    if (j > 0 && j < state.NTH - 1) {
+        dudy = ((*state.u)[i][j+1][k] - (*state.u)[i][j-1][k]) / (2.0 * dy);
+    } else if (j == 0) {
+        dudy = ((*state.u)[i][j+1][k] - (*state.u)[i][j][k]) / dy;
+    } else { // j == state.NTH - 1
+        dudy = ((*state.u)[i][j][k] - (*state.u)[i][j-1][k]) / dy;
+    }
 
     // dv/dx
-    double dvdx = (i > 0 && i < state.NR - 1) ?
-        ((*state.v)[i+1][j][k] - (*state.v)[i-1][j][k]) / (2.0 * dx) :
-        ((*state.v)[i+1][j][k] - (*state.v)[i][j][k]) / dx;
+    double dvdx;
+    if (i > 0 && i < state.NR - 1) {
+        dvdx = ((*state.v)[i+1][j][k] - (*state.v)[i-1][j][k]) / (2.0 * dx);
+    } else if (i == 0) {
+        dvdx = ((*state.v)[i+1][j][k] - (*state.v)[i][j][k]) / dx;
+    } else { // i == state.NR - 1
+        dvdx = ((*state.v)[i][j][k] - (*state.v)[i-1][j][k]) / dx;
+    }
 
     // dw/dx
-    double dwdx = (i > 0 && i < state.NR - 1) ?
-        ((*state.w)[i+1][j][k] - (*state.w)[i-1][j][k]) / (2.0 * dx) :
-        ((*state.w)[i+1][j][k] - (*state.w)[i][j][k]) / dx;
+    double dwdx;
+    if (i > 0 && i < state.NR - 1) {
+        dwdx = ((*state.w)[i+1][j][k] - (*state.w)[i-1][j][k]) / (2.0 * dx);
+    } else if (i == 0) {
+        dwdx = ((*state.w)[i+1][j][k] - (*state.w)[i][j][k]) / dx;
+    } else { // i == state.NR - 1
+        dwdx = ((*state.w)[i][j][k] - (*state.w)[i-1][j][k]) / dx;
+    }
 
-    // du/dy
-    double dudv = (j > 0 && j < state.NTH - 1) ?
-        ((*state.u)[i][j+1][k] - (*state.u)[i][j-1][k]) / (2.0 * dy) :
-        ((*state.u)[i][j+1][k] - (*state.u)[i][j][k]) / dy;
+    // Note: dudv was duplicate of dudy, removing it
 
     // dv/dy
-    double dvdy = (j > 0 && j < state.NTH - 1) ?
-        ((*state.v)[i][j+1][k] - (*state.v)[i][j-1][k]) / (2.0 * dy) :
-        ((*state.v)[i][j+1][k] - (*state.v)[i][j][k]) / dy;
+    double dvdy;
+    if (j > 0 && j < state.NTH - 1) {
+        dvdy = ((*state.v)[i][j+1][k] - (*state.v)[i][j-1][k]) / (2.0 * dy);
+    } else if (j == 0) {
+        dvdy = ((*state.v)[i][j+1][k] - (*state.v)[i][j][k]) / dy;
+    } else { // j == state.NTH - 1
+        dvdy = ((*state.v)[i][j][k] - (*state.v)[i][j-1][k]) / dy;
+    }
 
     // dw/dy
-    double dwdy = (j > 0 && j < state.NTH - 1) ?
-        ((*state.w)[i][j+1][k] - (*state.w)[i][j-1][k]) / (2.0 * dy) :
-        ((*state.w)[i][j+1][k] - (*state.w)[i][j][k]) / dy;
+    double dwdy;
+    if (j > 0 && j < state.NTH - 1) {
+        dwdy = ((*state.w)[i][j+1][k] - (*state.w)[i][j-1][k]) / (2.0 * dy);
+    } else if (j == 0) {
+        dwdy = ((*state.w)[i][j+1][k] - (*state.w)[i][j][k]) / dy;
+    } else { // j == state.NTH - 1
+        dwdy = ((*state.w)[i][j][k] - (*state.w)[i][j-1][k]) / dy;
+    }
 
     // du/dz
-    double dudz = (k > 0 && k < state.NZ - 1) ?
-        ((*state.u)[i][j][k+1] - (*state.u)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]) :
-        ((*state.u)[i][j][k+1] - (*state.u)[i][j][k]) / dz_k;
+    double dudz;
+    if (k > 0 && k < state.NZ - 1) {
+        dudz = ((*state.u)[i][j][k+1] - (*state.u)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]);
+    } else if (k == 0) {
+        dudz = ((*state.u)[i][j][k+1] - (*state.u)[i][j][k]) / dz_k;
+    } else { // k == state.NZ - 1
+        dudz = ((*state.u)[i][j][k] - (*state.u)[i][j][k-1]) / dz_k;
+    }
 
     // dv/dz
-    double dvdz = (k > 0 && k < state.NZ - 1) ?
-        ((*state.v)[i][j][k+1] - (*state.v)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]) :
-        ((*state.v)[i][j][k+1] - (*state.v)[i][j][k]) / dz_k;
+    double dvdz;
+    if (k > 0 && k < state.NZ - 1) {
+        dvdz = ((*state.v)[i][j][k+1] - (*state.v)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]);
+    } else if (k == 0) {
+        dvdz = ((*state.v)[i][j][k+1] - (*state.v)[i][j][k]) / dz_k;
+    } else { // k == state.NZ - 1
+        dvdz = ((*state.v)[i][j][k] - (*state.v)[i][j][k-1]) / dz_k;
+    }
 
     // dw/dz
-    double dwdz = (k > 0 && k < state.NZ - 1) ?
-        ((*state.w)[i][j][k+1] - (*state.w)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]) :
-        ((*state.w)[i][j][k+1] - (*state.w)[i][j][k]) / dz_k;
+    double dwdz;
+    if (k > 0 && k < state.NZ - 1) {
+        dwdz = ((*state.w)[i][j][k+1] - (*state.w)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]);
+    } else if (k == 0) {
+        dwdz = ((*state.w)[i][j][k+1] - (*state.w)[i][j][k]) / dz_k;
+    } else { // k == state.NZ - 1
+        dwdz = ((*state.w)[i][j][k] - (*state.w)[i][j][k-1]) / dz_k;
+    }
 
     // Strain rate tensor components (symmetric)
     S.S11 = dudx;           // du/dx
@@ -168,8 +213,8 @@ Takes in the state, grid, the eddy diffusivities, and the scalar and computes th
 double compute_scalar_diffusion_tendency(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
-    const std::vector<std::vector<std::vector<float>>>& K_field,
-    const std::vector<std::vector<std::vector<float>>>& phi,
+    const Field3D& K_field,
+    const Field3D& phi,
     int i, int j, int k,
     int var_index
 ) 
@@ -186,16 +231,17 @@ Takes in the state, grid, the eddy viscosity, and the momentum and computes the 
 void compute_momentum_diffusion_tendencies(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
-    const std::vector<std::vector<std::vector<float>>>& nu_t,
-    std::vector<std::vector<std::vector<float>>>& dudt_sgs,
-    std::vector<std::vector<std::vector<float>>>& dvdt_sgs,
-    std::vector<std::vector<std::vector<float>>>& dwdt_sgs
+    const Field3D& nu_t,
+    Field3D& dudt_sgs,
+    Field3D& dvdt_sgs,
+    Field3D& dwdt_sgs
 ) 
 {
     // Simplified momentum diffusion (would need proper implementation)
     // For now, apply weak damping to prevent instability
 
     // Iterate over the rows, columns, and levels and compute the momentum diffusion tendencies.        
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < state.NR; ++i) 
     {
         // Iterate over the columns and compute the momentum diffusion tendencies.
@@ -222,13 +268,14 @@ Takes in the state, grid, the eddy diffusivities, and the scalar and computes th
 void compute_scalar_diffusion_tendencies(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
-    const std::vector<std::vector<std::vector<float>>>& K_field,
-    const std::vector<std::vector<std::vector<float>>>& phi,
-    std::vector<std::vector<std::vector<float>>>& dphi_dt_sgs
+    const Field3D& K_field,
+    const Field3D& phi,
+    Field3D& dphi_dt_sgs
 ) 
 {
     // Simplified scalar diffusion (would need proper implementation)
     // Iterate over the rows, columns, and levels and compute the scalar diffusion tendencies.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < state.NR; ++i) 
     {
         // Iterate over the columns and compute the scalar diffusion tendencies.
@@ -300,23 +347,21 @@ double compute_brunt_vaisala_frequency(
 /*This function applies the positivity limits.
 Takes in the field, minimum value, and maximum value and applies the positivity limits.*/
 void apply_positivity_limits(
-    std::vector<std::vector<std::vector<float>>>& field,
+    Field3D& field,
     double min_value,
     double max_value
 ) 
 {
-    // Iterate over the planes, rows, and values and apply the positivity limits.   
-    for (auto& plane : field) 
+    // Iterate over all grid points and apply the positivity limits
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < field.size_r(); ++i) 
     {
-        // Iterate over the rows and apply the positivity limits.
-        for (auto& row : plane) 
+        for (int j = 0; j < field.size_th(); ++j) 
         {
-            // Iterate over the values and apply the positivity limits.
-            for (auto& val : row) 
+            for (int k = 0; k < field.size_z(); ++k) 
             {
-                // Apply the positivity limits.
-                val = std::max(static_cast<float>(min_value),
-                      std::min(static_cast<float>(max_value), val));
+                field[i][j][k] = std::max(static_cast<float>(min_value),
+                      std::min(static_cast<float>(max_value), static_cast<float>(field[i][j][k])));
             }
         }
     }

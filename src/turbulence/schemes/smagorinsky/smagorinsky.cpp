@@ -49,12 +49,12 @@ void SmagorinskyScheme::compute(
 ) 
 {
     // Initialize tendency arrays
-    eddy_viscosity::initialize_3d_field(tend.dudt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dvdt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dwdt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dthetadt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dqvdt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dtkedt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dudt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dvdt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dwdt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dthetadt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dqvdt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dtkedt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
 
     // Compute eddy coefficients
     compute_eddy_coefficients(cfg, grid, state);
@@ -84,8 +84,8 @@ void SmagorinskyScheme::compute(
         diag_opt->nu_t = nu_t_;
         diag_opt->K_theta = K_theta_;
         diag_opt->K_q = K_q_;
-        eddy_viscosity::initialize_3d_field(diag_opt->K_tke, state.NR, state.NTH, state.NZ, 0.0f);
-        eddy_viscosity::initialize_3d_field(diag_opt->Cs_eff, state.NR, state.NTH, state.NZ, static_cast<float>(Cs_));
+        diag_opt->K_tke.resize(state.NR, state.NTH, state.NZ, 0.0f);
+        diag_opt->Cs_eff.resize(state.NR, state.NTH, state.NZ, static_cast<float>(Cs_));
     }
 }
 
@@ -98,9 +98,9 @@ void SmagorinskyScheme::compute_eddy_coefficients(
 ) 
 {
     // Initialize coefficient arrays
-    eddy_viscosity::initialize_3d_field(nu_t_, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(K_theta_, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(K_q_, state.NR, state.NTH, state.NZ, 0.0f);
+    nu_t_.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    K_theta_.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    K_q_.resize(state.NR, state.NTH, state.NZ, 0.0f);
 
     // Iterate over the rows, columns, and levels and compute the eddy coefficients.
     for (int i = 0; i < state.NR; ++i)

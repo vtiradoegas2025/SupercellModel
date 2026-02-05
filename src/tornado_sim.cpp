@@ -174,11 +174,16 @@ double global_cape_target = 2500.0; // J/kg
 // Global microphysics scheme name
 std::string global_microphysics_scheme = "kessler";
 
+// Global dynamics scheme name
+std::string global_dynamics_scheme_name = "";
+
 /*This function loads the configuration from a YAML file.
 Takes in the configuration path, duration, write every, and output directory and loads the configuration from the YAML file.*/
 void load_config(const std::string& config_path, int& duration_s, int& write_every_s, std::string& /*outdir*/)
 {
-    if (config_path.empty()) return;
+    if (config_path.empty()) {
+        return;
+    }
 
     auto config = parse_yaml_simple(config_path);
     std::cout << "Loaded config with " << config.size() << " keys" << std::endl;
@@ -233,7 +238,6 @@ void load_config(const std::string& config_path, int& duration_s, int& write_eve
 
     // Load grid parameters
     bool grid_changed = false;
-    std::cout << "Checking for grid.nz key..." << std::endl;
 
     // If the grid size x is specified in the config, load the grid size x.
     if (config.count("grid.nx"))
@@ -265,7 +269,6 @@ void load_config(const std::string& config_path, int& duration_s, int& write_eve
     if (config.count("grid.nz"))
     {
         int new_NZ = std::stoi(config["grid.nz"]);
-        std::cout << "Config loaded NZ: " << new_NZ << " (was " << NZ << ")" << std::endl;
 
         // If the grid size z is not equal to the current grid size z, load the grid size z.
         if (new_NZ != NZ) 
@@ -281,6 +284,14 @@ void load_config(const std::string& config_path, int& duration_s, int& write_eve
         dr = std::stod(config["grid.dx"]);
     }
 
+    // If the grid resolution y is specified in the config, load the grid resolution y.
+    // Note: For cylindrical coordinates, dtheta is computed from NTH, but we can load dy for reference
+    if (config.count("grid.dy"))
+    {
+        // Store for potential future use (currently dtheta is computed from NTH)
+        // This parameter is loaded but may not be actively used in cylindrical coordinate system
+    }
+
     // If the grid resolution z is specified in the config, load the grid resolution z.
     if (config.count("grid.dz"))
     {
@@ -293,12 +304,10 @@ void load_config(const std::string& config_path, int& duration_s, int& write_eve
         dt = std::stod(config["grid.dt"]);
     }
 
-    // If the grid changed, resize the fields.
-    if (grid_changed) 
+    // Always resize fields to ensure they're allocated (even if grid didn't change from defaults)
     {
         extern void resize_fields();
         resize_fields();
-        std::cout << "Grid resized to: " << NR << " x " << NTH << " x " << NZ << std::endl;
     }
 
     // If the hodograph u surface is specified in the config, load the hodograph u surface.
@@ -466,25 +475,101 @@ void load_config(const std::string& config_path, int& duration_s, int& write_eve
         global_turbulence_config.Pr_t = std::stod(config["turbulence.Pr_t"]);
     }
 
+    // If the dynamics scheme is specified in the config, load the dynamics scheme.
+    if (config.count("dynamics.scheme"))
+    {
+        global_dynamics_scheme_name = config["dynamics.scheme"];
+    }
+
+    // Load numerics scheme configurations
+    if (config.count("numerics.advection"))
+    {
+        global_advection_config.scheme_id = config["numerics.advection"];
+    }
+    if (config.count("numerics.diffusion"))
+    {
+        global_diffusion_config.scheme_id = config["numerics.diffusion"];
+    }
+    if (config.count("numerics.time_stepping"))
+    {
+        global_time_stepping_config.scheme_id = config["numerics.time_stepping"];
+    }
+
+    // Load chaos configuration parameters (will be used when initialize_chaos is called)
+    if (config.count("chaos.scheme"))
+    {
+        global_chaos_config.scheme_id = config["chaos.scheme"];
+    }
+    if (config.count("chaos.seed"))
+    {
+        global_chaos_config.seed = std::stoull(config["chaos.seed"]);
+    }
+    if (config.count("chaos.member_id"))
+    {
+        global_chaos_config.member_id = std::stoi(config["chaos.member_id"]);
+    }
+    if (config.count("chaos.dt_chaos"))
+    {
+        global_chaos_config.dt_chaos = std::stod(config["chaos.dt_chaos"]);
+    }
+    if (config.count("chaos.tau_t"))
+    {
+        global_chaos_config.tau_t = std::stod(config["chaos.tau_t"]);
+    }
+    if (config.count("chaos.Lx"))
+    {
+        global_chaos_config.Lx = std::stod(config["chaos.Lx"]);
+    }
+    if (config.count("chaos.Ly"))
+    {
+        global_chaos_config.Ly = std::stod(config["chaos.Ly"]);
+    }
+
+    // Load terrain configuration parameters
+    if (config.count("terrain.scheme"))
+    {
+        global_terrain_config.scheme_id = config["terrain.scheme"];
+    }
+    if (config.count("terrain.ztop"))
+    {
+        global_terrain_config.ztop = std::stod(config["terrain.ztop"]);
+    }
+    if (config.count("terrain.coord_id"))
+    {
+        global_terrain_config.coord_id = config["terrain.coord_id"];
+    }
+
     // For now, we'll keep the grid parameters fixed
     // Future enhancement: make grid configurable
-    std::cout << "Loaded configuration from: " << config_path << std::endl;
+    std::cout << "\n" << "=" << std::string(60, '=') << std::endl;
+    std::cout << "CONFIGURATION LOADED" << std::endl;
+    std::cout << "=" << std::string(60, '=') << std::endl;
+    std::cout << "Config file: " << config_path << std::endl;
     std::cout << "Duration: " << duration_s << "s" << std::endl;
     std::cout << "Write every: " << write_every_s << "s" << std::endl;
-    std::cout << "CAPE target: " << global_cape_target << " J/kg" << std::endl;
-    std::cout << "Wind profile: SFC(" << global_wind_profile.u_sfc << "," << global_wind_profile.v_sfc
+    std::cout << "\nGrid parameters:" << std::endl;
+    std::cout << "  NR=" << NR << ", NTH=" << NTH << ", NZ=" << NZ << std::endl;
+    std::cout << "  dr=" << dr << "m, dz=" << dz << "m, dt=" << dt << "s" << std::endl;
+    std::cout << "\nEnvironment:" << std::endl;
+    std::cout << "  CAPE target: " << global_cape_target << " J/kg" << std::endl;
+    std::cout << "  Wind profile: SFC(" << global_wind_profile.u_sfc << "," << global_wind_profile.v_sfc
               << ") 1km(" << global_wind_profile.u_1km << "," << global_wind_profile.v_1km
               << ") 6km(" << global_wind_profile.u_6km << "," << global_wind_profile.v_6km << ")" << std::endl;
-    std::cout << "Radiation: " << global_radiation_config.scheme_id
+    std::cout << "\nPhysics schemes:" << std::endl;
+    std::cout << "  Dynamics: " << global_dynamics_scheme_name << std::endl;
+    std::cout << "  Microphysics: " << global_microphysics_scheme << std::endl;
+    std::cout << "  Radiation: " << global_radiation_config.scheme_id
               << " (LW: " << (global_radiation_config.do_lw ? "on" : "off")
               << ", SW: " << (global_radiation_config.do_sw ? "on" : "off")
               << ", dt: " << global_radiation_config.dt_radiation << "s)" << std::endl;
-    std::cout << "Boundary Layer: " << global_boundary_layer_config.scheme_id
+    std::cout << "  Boundary Layer: " << global_boundary_layer_config.scheme_id
               << " (surface fluxes: " << (global_boundary_layer_config.apply_surface_fluxes ? "on" : "off")
               << ", dt: " << global_boundary_layer_config.dt_pbl << "s)" << std::endl;
-    std::cout << "Turbulence: " << global_turbulence_config.scheme_id
+    std::cout << "  Turbulence: " << global_turbulence_config.scheme_id
               << " (Cs: " << global_turbulence_config.Cs
               << ", dt: " << global_turbulence_config.dt_sgs << "s)" << std::endl;
+    std::cout << "  Chaos: " << global_chaos_config.scheme_id << std::endl;
+    std::cout << "=" << std::string(60, '=') << "\n" << std::endl;
 }
 
 /*This function is the main function.
@@ -513,6 +598,10 @@ int main(int argc, char** argv)
         {
             duration_s = std::stoi(arg.substr(11));
         }
+        else if (arg == "--duration" && i + 1 < argc)
+        {
+            duration_s = std::stoi(argv[++i]);
+        }
         else if (arg.rfind("--write-every=", 0) == 0)
         {
             write_every_s = std::max(0, std::stoi(arg.substr(14)));
@@ -524,6 +613,10 @@ int main(int argc, char** argv)
         else if (arg.rfind("--config=", 0) == 0)
         {
             config_path = arg.substr(9);
+        }
+        else if (arg == "--config" && i + 1 < argc)
+        {
+            config_path = argv[++i];
         }
         // --export-all flag removed - all fields are now always exported
     }
@@ -540,45 +633,83 @@ int main(int argc, char** argv)
     // Initialize the simulation state once (after grid is resized)
     initialize();
 
-    // Apply chaos initial condition perturbations (must be done after initialize())
-    apply_chaos_initial_conditions();
-
-    // Initialize dynamics scheme (default to tornado for now)
-    initialize_dynamics("tornado");
-
-    // Initialize radiation scheme (default to simple_grey)
-    initialize_radiation("simple_grey");
-
-    // Initialize boundary layer scheme (default to slab)
-    initialize_boundary_layer("slab");
-
-    // Initialize turbulence scheme (default to smagorinsky)
-    initialize_turbulence("smagorinsky");
-
-    // Initialize numerics framework
+    // Initialize numerics framework (must be before chaos to set grid metrics)
     initialize_numerics();
 
-    // Initialize chaos perturbation scheme (default to none for deterministic runs)
-    chaos::ChaosConfig chaos_cfg;
-    initialize_chaos(chaos_cfg);
+    // Initialize chaos perturbation scheme (use loaded config if available)
+    // Must be after numerics initialization to have correct grid metrics
+    if (global_chaos_config.scheme_id.empty()) {
+        global_chaos_config.scheme_id = "none";  // default
+    }
+    initialize_chaos(global_chaos_config);
 
-    // Terrain not yet implemented - skip for now
+    // Apply chaos initial condition perturbations (must be done after initialize() and chaos scheme initialization)
+    apply_chaos_initial_conditions();
+
+    // Initialize dynamics scheme (use config if available, default to tornado)
+    std::string dynamics_scheme_name = "tornado";  // default
+    if (!global_dynamics_scheme_name.empty()) {
+        dynamics_scheme_name = global_dynamics_scheme_name;
+    }
+    initialize_dynamics(dynamics_scheme_name);
+
+    // Initialize radiation scheme (use loaded config)
+    if (global_radiation_config.scheme_id.empty()) {
+        global_radiation_config.scheme_id = "simple_grey";  // default
+    }
+    initialize_radiation(global_radiation_config.scheme_id, global_radiation_config);
+
+    // Initialize boundary layer scheme (use loaded config)
+    if (global_boundary_layer_config.scheme_id.empty()) {
+        global_boundary_layer_config.scheme_id = "slab";  // default
+    }
+    initialize_boundary_layer(global_boundary_layer_config.scheme_id, global_boundary_layer_config, global_surface_config);
+
+    // Initialize turbulence scheme (use loaded config)
+    if (global_turbulence_config.scheme_id.empty()) {
+        global_turbulence_config.scheme_id = "smagorinsky";  // default
+    }
+    initialize_turbulence(global_turbulence_config.scheme_id, global_turbulence_config);
+
+    // Terrain system is available but not initialized by default
+    // To enable terrain, call: initialize_terrain("bell", TerrainConfig{}) or similar
 
     if (headless)
     {
         // Run a headless loop with optional periodic export
         const int thetaIndex = 0;
 #ifdef EXPORT_NPY
-        auto save_field_slice_npy = [&](const std::vector<std::vector<std::vector<float>>>& field, int theta, const std::string& filename)
+        auto save_field_slice_npy = [&](const Field3D& field, int theta, const std::string& filename)
         {
             std::vector<float> buf;
             buf.resize(static_cast<size_t>(NR) * static_cast<size_t>(NZ));
             size_t idx = 0;
+            
+            // Debug: Check values before saving
+            static bool debug_save = true;
+            if (debug_save && theta == 0) {
+                float field_min = 1e10, field_max = -1e10;
+                int nan_count = 0;
+                for (int i = 0; i < NR && i < 10; ++i) {
+                    for (int k = 0; k < NZ && k < 10; ++k) {
+                        float val = field[i][theta][k];
+                        if (std::isnan(val)) nan_count++;
+                        if (val < field_min) field_min = val;
+                        if (val > field_max) field_max = val;
+                    }
+                }
+                std::cout << "[SAVE DEBUG] Saving field slice theta=" << theta << ":" << std::endl;
+                std::cout << "  Sample range: [" << field_min << ", " << field_max << "]" << std::endl;
+                std::cout << "  NaN count (sample): " << nan_count << std::endl;
+                debug_save = false;
+            }
+            
             for (int k = 0; k < NZ; ++k)
             {
                 for (int i = 0; i < NR; ++i)
                 {
-                    buf[idx++] = field[i][theta][k];
+                    float val = static_cast<float>(field[i][theta][k]);
+                    buf[idx++] = val;
                 }
             }
             std::string header_dict = "{'descr': '<f4', 'fortran_order': False, 'shape': (" + std::to_string(NZ) + ", " + std::to_string(NR) + "), }";
@@ -608,6 +739,32 @@ int main(int argc, char** argv)
         Takes in the export index and writes all the fields to the output directory.*/
         auto write_all_fields = [&](int export_index)
         {
+            // Debug: Check values before writing
+            if (export_index == 0) {
+                std::cout << "\n[EXPORT DEBUG] Writing timestep " << export_index << " (t=" << simulation_time << "s)" << std::endl;
+                float theta_min = 1e10, theta_max = -1e10;
+                float u_min = 1e10, u_max = -1e10;
+                int nan_count = 0;
+                for (int i = 0; i < NR && i < 10; ++i) {
+                    for (int j = 0; j < NTH && j < 3; ++j) {
+                        for (int k = 0; k < NZ && k < 3; ++k) {
+                            if (std::isnan(theta[i][j][k])) nan_count++;
+                            if (theta[i][j][k] < theta_min) theta_min = theta[i][j][k];
+                            if (theta[i][j][k] > theta_max) theta_max = theta[i][j][k];
+                            if (u[i][j][k] < u_min) u_min = u[i][j][k];
+                            if (u[i][j][k] > u_max) u_max = u[i][j][k];
+                        }
+                    }
+                }
+                std::cout << "  Theta sample: [" << theta_min << ", " << theta_max << "] K" << std::endl;
+                std::cout << "  Wind (u) sample: [" << u_min << ", " << u_max << "] m/s" << std::endl;
+                std::cout << "  NaN count (sample): " << nan_count << std::endl;
+                if (theta_min < 0 || theta_max > 500) {
+                    std::cerr << "  ⚠️  ERROR: Theta values are wrong before export!" << std::endl;
+                }
+                std::cout << std::endl;
+            }
+            
             // Create outdir/step_XXXXXX
             std::ostringstream stepdir;
             stepdir << outdir << "/step_" << std::setfill('0') << std::setw(6) << export_index;
@@ -647,10 +804,67 @@ int main(int argc, char** argv)
         int steps = 0;
         int export_index = 0;
         double simulation_time = 0.0;  // simulation time in seconds
+        
+        // Debug: Check values before time stepping
+        {
+            float theta_min = 1e10, theta_max = -1e10;
+            float u_min = 1e10, u_max = -1e10;
+            int nan_count = 0;
+            for (int i = 0; i < NR && i < 10; ++i) {
+                for (int j = 0; j < NTH && j < 5; ++j) {
+                    for (int k = 0; k < NZ && k < 5; ++k) {
+                        if (std::isnan(theta[i][j][k])) nan_count++;
+                        if (theta[i][j][k] < theta_min) theta_min = theta[i][j][k];
+                        if (theta[i][j][k] > theta_max) theta_max = theta[i][j][k];
+                        if (u[i][j][k] < u_min) u_min = u[i][j][k];
+                        if (u[i][j][k] > u_max) u_max = u[i][j][k];
+                    }
+                }
+            }
+            std::cout << "\n[TIME STEP DEBUG] Before time stepping (t=0):" << std::endl;
+            std::cout << "  Theta sample: min=" << theta_min << "K, max=" << theta_max << "K" << std::endl;
+            std::cout << "  Wind (u) sample: min=" << u_min << "m/s, max=" << u_max << "m/s" << std::endl;
+            std::cout << "  NaN count (sample): " << nan_count << std::endl;
+            if (theta_min < 0 || theta_max > 500) {
+                std::cerr << "  ⚠️  ERROR: Theta already corrupted before time stepping!" << std::endl;
+            }
+            std::cout << std::endl;
+        }
+        
         while (true)
         {
+            // Apply physics processes
+            step_radiation(simulation_time);
+            step_boundary_layer(simulation_time);
             step_dynamics(simulation_time);
             simulation_time += dt;  // increment simulation time
+            
+            // Debug: Check values periodically during time stepping
+            if (steps % 100 == 0 && steps < 1000) {
+                float theta_min = 1e10, theta_max = -1e10;
+                float u_min = 1e10, u_max = -1e10;
+                int nan_count = 0, inf_count = 0;
+                for (int i = 0; i < NR && i < 10; ++i) {
+                    for (int j = 0; j < NTH && j < 5; ++j) {
+                        for (int k = 0; k < NZ && k < 5; ++k) {
+                            if (std::isnan(theta[i][j][k])) nan_count++;
+                            if (std::isinf(theta[i][j][k])) inf_count++;
+                            if (theta[i][j][k] < theta_min) theta_min = theta[i][j][k];
+                            if (theta[i][j][k] > theta_max) theta_max = theta[i][j][k];
+                            if (u[i][j][k] < u_min) u_min = u[i][j][k];
+                            if (u[i][j][k] > u_max) u_max = u[i][j][k];
+                        }
+                    }
+                }
+                std::cout << "[TIME STEP DEBUG] Step " << steps << " (t=" << simulation_time << "s):" << std::endl;
+                std::cout << "  Theta sample: min=" << theta_min << "K, max=" << theta_max << "K" << std::endl;
+                std::cout << "  Wind (u) sample: min=" << u_min << "m/s, max=" << u_max << "m/s" << std::endl;
+                std::cout << "  NaN/Inf count (sample): " << nan_count << "/" << inf_count << std::endl;
+                if (theta_min < 0 || theta_max > 500 || std::abs(u_min) > 1000 || std::abs(u_max) > 1000) {
+                    std::cerr << "  ⚠️  WARNING: Values going wrong at step " << steps << "!" << std::endl;
+                }
+                std::cout << std::endl;
+            }
 #ifdef EXPORT_NPY
             // GUI-style ms export (kept for compatibility when headless + --export-ms)
             if (export_ms > 0)

@@ -1,6 +1,7 @@
 #pragma once
 #include "../../base/thermodynamics.hpp"
 #include "microphysics_base.hpp"
+#include "field3d.hpp"
 
 
 /* This is the Lin scheme class
@@ -70,24 +71,24 @@ public:
     rainwater mixing ratio, ice mixing ratio, snow mixing ratio, graupel mixing ratio, hail mixing ratio,
     and the time step and computes the tendencies for the Lin scheme.*/
     void compute_tendencies(
-        const std::vector<std::vector<std::vector<float>>>& p,
-        const std::vector<std::vector<std::vector<float>>>& theta,
-        const std::vector<std::vector<std::vector<float>>>& qv,
-        const std::vector<std::vector<std::vector<float>>>& qc,
-        const std::vector<std::vector<std::vector<float>>>& qr,
-        const std::vector<std::vector<std::vector<float>>>& qi,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
+        const Field3D& p,
+        const Field3D& theta,
+        const Field3D& qv,
+        const Field3D& qc,
+        const Field3D& qr,
+        const Field3D& qi,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
         double dt,
-        std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-        std::vector<std::vector<std::vector<float>>>& dqv_dt,
-        std::vector<std::vector<std::vector<float>>>& dqc_dt,
-        std::vector<std::vector<std::vector<float>>>& dqr_dt,
-        std::vector<std::vector<std::vector<float>>>& dqi_dt,
-        std::vector<std::vector<std::vector<float>>>& dqs_dt,
-        std::vector<std::vector<std::vector<float>>>& dqg_dt,
-        std::vector<std::vector<std::vector<float>>>& dqh_dt
+        Field3D& dtheta_dt,
+        Field3D& dqv_dt,
+        Field3D& dqc_dt,
+        Field3D& dqr_dt,
+        Field3D& dqi_dt,
+        Field3D& dqs_dt,
+        Field3D& dqg_dt,
+        Field3D& dqh_dt
     ) override;
 
     /*This function computes the radar reflectivity for the Lin scheme.
@@ -95,13 +96,13 @@ public:
     graupel mixing ratio, hail mixing ratio, and the radar reflectivity field
     and computes the radar reflectivity for the Lin scheme.*/
     void compute_radar_reflectivity(
-        const std::vector<std::vector<std::vector<float>>>& qc,
-        const std::vector<std::vector<std::vector<float>>>& qr,
-        const std::vector<std::vector<std::vector<float>>>& qi,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
-        std::vector<std::vector<std::vector<float>>>& reflectivity_dbz
+        const Field3D& qc,
+        const Field3D& qr,
+        const Field3D& qi,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
+        Field3D& reflectivity_dbz
     ) override;
 
     std::string get_scheme_name() const override { return "lin"; }
@@ -114,10 +115,10 @@ private:
     Takes in the temperature, pressure, vapor mixing ratio, and cloud water mixing ratio
     and computes the saturation adjustment for the Lin scheme. Simplified for now.*/
     void saturation_adjustment(
-        const std::vector<std::vector<std::vector<float>>>& temperature,
-        const std::vector<std::vector<std::vector<float>>>& p,
-        std::vector<std::vector<std::vector<float>>>& qv,
-        std::vector<std::vector<std::vector<float>>>& qc
+        const Field3D& temperature,
+        const Field3D& p,
+        Field3D& qv,
+        Field3D& qc
     );
 
     /*This function computes the warm rain processes for the Lin scheme.
@@ -125,15 +126,15 @@ private:
     rainwater mixing ratio, and the tendencies for the cloud water, rainwater, and vapor mixing ratios
     and computes the warm rain processes for the Lin scheme.*/
     void compute_warm_rain_processes(
-        const std::vector<std::vector<std::vector<float>>>& temperature,
-        const std::vector<std::vector<std::vector<float>>>& p,
-        const std::vector<std::vector<std::vector<float>>>& qv,
-        const std::vector<std::vector<std::vector<float>>>& qc,
-        const std::vector<std::vector<std::vector<float>>>& qr,
-        std::vector<std::vector<std::vector<float>>>& dqc_dt,
-        std::vector<std::vector<std::vector<float>>>& dqr_dt,
-        std::vector<std::vector<std::vector<float>>>& dqv_dt,
-        std::vector<std::vector<std::vector<float>>>& dtheta_dt
+        const Field3D& temperature,
+        const Field3D& p,
+        const Field3D& qv,
+        const Field3D& qc,
+        const Field3D& qr,
+        Field3D& dqc_dt,
+        Field3D& dqr_dt,
+        Field3D& dqv_dt,
+        Field3D& dtheta_dt
     );
 
     /*This function computes the ice processes for the Lin scheme.
@@ -142,21 +143,21 @@ private:
     and the tendencies for the cloud water, ice, snow, graupel, hail, and vapor mixing ratios
     and computes the ice processes for the Lin scheme.*/
     void compute_ice_processes(
-        const std::vector<std::vector<std::vector<float>>>& temperature,
-        const std::vector<std::vector<std::vector<float>>>& p,
-        const std::vector<std::vector<std::vector<float>>>& qv,
-        const std::vector<std::vector<std::vector<float>>>& qc,
-        const std::vector<std::vector<std::vector<float>>>& qi,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
-        std::vector<std::vector<std::vector<float>>>& dqc_dt,
-        std::vector<std::vector<std::vector<float>>>& dqi_dt,
-        std::vector<std::vector<std::vector<float>>>& dqs_dt,
-        std::vector<std::vector<std::vector<float>>>& dqg_dt,
-        std::vector<std::vector<std::vector<float>>>& dqh_dt,
-        std::vector<std::vector<std::vector<float>>>& dqv_dt,
-        std::vector<std::vector<std::vector<float>>>& dtheta_dt
+        const Field3D& temperature,
+        const Field3D& p,
+        const Field3D& qv,
+        const Field3D& qc,
+        const Field3D& qi,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
+        Field3D& dqc_dt,
+        Field3D& dqi_dt,
+        Field3D& dqs_dt,
+        Field3D& dqg_dt,
+        Field3D& dqh_dt,
+        Field3D& dqv_dt,
+        Field3D& dtheta_dt
     );
 
     /*This function computes the melting processes for the Lin scheme.
@@ -164,15 +165,15 @@ private:
     and the tendencies for the snow, graupel, hail, and rainwater mixing ratios
     and computes the melting processes for the Lin scheme.*/
     void compute_melting_processes(
-        const std::vector<std::vector<std::vector<float>>>& temperature,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
-        std::vector<std::vector<std::vector<float>>>& dqs_dt,
-        std::vector<std::vector<std::vector<float>>>& dqg_dt,
-        std::vector<std::vector<std::vector<float>>>& dqh_dt,
-        std::vector<std::vector<std::vector<float>>>& dqr_dt,
-        std::vector<std::vector<std::vector<float>>>& dtheta_dt
+        const Field3D& temperature,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
+        Field3D& dqs_dt,
+        Field3D& dqg_dt,
+        Field3D& dqh_dt,
+        Field3D& dqr_dt,
+        Field3D& dtheta_dt
     );
 
     /*This function computes the sedimentation for the Lin scheme.
@@ -180,14 +181,14 @@ private:
     and the tendencies for the rainwater, snow, graupel, and hail mixing ratios
     and computes the sedimentation for the Lin scheme.*/
     void compute_sedimentation(
-        const std::vector<std::vector<std::vector<float>>>& qr,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
-        std::vector<std::vector<std::vector<float>>>& dqr_dt,
-        std::vector<std::vector<std::vector<float>>>& dqs_dt,
-        std::vector<std::vector<std::vector<float>>>& dqg_dt,
-        std::vector<std::vector<std::vector<float>>>& dqh_dt
+        const Field3D& qr,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
+        Field3D& dqr_dt,
+        Field3D& dqs_dt,
+        Field3D& dqg_dt,
+        Field3D& dqh_dt
     );
 
     // Utility functions

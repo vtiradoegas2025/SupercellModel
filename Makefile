@@ -1,5 +1,54 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -O2 -I include
+CXXFLAGS := -std=c++17 -O3 -march=native -mtune=native -I include
+# Detect OpenMP support - handle both g++ and clang++
+# On macOS, g++ is actually clang++, so check for libomp
+# Try to find libomp via brew
+LIBOMP_PATH := $(shell brew --prefix libomp 2>/dev/null)
+ifeq ($(LIBOMP_PATH),)
+  # Try alternative path
+  LIBOMP_PATH := $(shell test -d /opt/homebrew/opt/libomp && echo /opt/homebrew/opt/libomp || echo "")
+endif
+ifneq ($(LIBOMP_PATH),)
+  # libomp found - use it for clang
+  # Check if include directory exists, if not try to find omp.h elsewhere
+  ifeq ($(shell test -d $(LIBOMP_PATH)/include && echo "yes"),yes)
+    LIBOMP_INCLUDE := -I$(LIBOMP_PATH)/include
+  else
+    # Try to find omp.h in common locations
+    OMP_H_PATH := $(shell find $(LIBOMP_PATH) -name "omp.h" 2>/dev/null | head -1)
+    ifneq ($(OMP_H_PATH),)
+      LIBOMP_INCLUDE := -I$(shell dirname $(OMP_H_PATH))
+    else
+      # No include found, disable OpenMP
+      LIBOMP_PATH :=
+    endif
+  endif
+  ifneq ($(LIBOMP_PATH),)
+    OPENMP_FLAG := -Xpreprocessor -fopenmp
+    OPENMP_LIB := -L$(LIBOMP_PATH)/lib -lomp
+    CXXFLAGS += $(OPENMP_FLAG) $(LIBOMP_INCLUDE)
+  endif
+endif
+# If OpenMP not found above, try standard -fopenmp (works for GCC)
+# If that also fails, OpenMP will be disabled (pragmas will be ignored)
+ifeq ($(LIBOMP_PATH),)
+  # Test if -fopenmp works (GCC) or fails (clang without libomp)
+  OPENMP_TEST := $(shell echo 'int main(){return 0;}' | $(CXX) -x c++ -fopenmp - -o /dev/null 2>&1)
+  ifeq ($(OPENMP_TEST),)
+    # -fopenmp works (GCC)
+    OPENMP_FLAG := -fopenmp
+    OPENMP_LIB :=
+    CXXFLAGS += $(OPENMP_FLAG)
+  else
+    # -fopenmp doesn't work, OpenMP disabled
+    # Pragmas will be ignored due to #ifdef _OPENMP guards
+    OPENMP_FLAG :=
+    OPENMP_LIB :=
+  endif
+endif
+LDLIBS += $(OPENMP_LIB)
+# Optional: uncomment to see vectorization reports
+# CXXFLAGS += -ftree-vectorize -fopt-info-vec
 # Optional GUI (SFML) support; default off
 GUI ?= 0
 # Optional: enable slice export from GUI with S key
@@ -8,7 +57,8 @@ EXPORT_NPY ?= 1
 ifeq ($(EXPORT_NPY),1)
   CXXFLAGS += -DEXPORT_NPY
 endif
-SRCS := src/equations.cpp src/dynamics.cpp src/tornado_sim.cpp src/radiation.cpp src/boundary_layer.cpp src/turbulence.cpp src/numerics.cpp \
+SRCS := src/equations.cpp src/dynamics.cpp src/tornado_sim.cpp src/radiation.cpp src/boundary_layer.cpp src/turbulence.cpp src/numerics.cpp src/simd_utils.cpp \
+         src/advection/advection.cpp \
          src/radar.cpp \
          src/radar/base/radar_base.cpp \
          src/radar/factory.cpp \
@@ -53,13 +103,13 @@ SRCS := src/equations.cpp src/dynamics.cpp src/tornado_sim.cpp src/radiation.cpp
          src/chaos/schemes/none/none.cpp \
          src/chaos/schemes/initial_conditions/initial_conditions.cpp \
          src/chaos/schemes/boundary_layer/boundary_layer.cpp \
-         src/chaos/schemes/full_stochastic/full_stochastic.cpp
-# Terrain files excluded due to compilation issues - TODO for future contributors
-#         src/terrain/base/topography.cpp \
-#         src/terrain/factory.cpp \
-#         src/terrain/schemes/bell/bell.cpp \
-#         src/terrain/schemes/schar/schar.cpp \
-#         src/terrain/schemes/none.cpp
+         src/chaos/schemes/full_stochastic/full_stochastic.cpp \
+         src/terrain.cpp \
+         src/terrain/base/topography.cpp \
+         src/terrain/factory.cpp \
+         src/terrain/schemes/bell/bell.cpp \
+         src/terrain/schemes/schar/schar.cpp \
+         src/terrain/schemes/none.cpp
 CPPFLAGS :=
 LDLIBS :=
 ifeq ($(GUI),1)

@@ -1,4 +1,4 @@
-# SupercellModel 3D Visualization
+# TornadoModel 3D Visualization
 
 This folder contains the complete 3D visualization pipeline for supercell thunderstorm simulations.
 
@@ -9,6 +9,18 @@ The visualization system provides:
 - **Offline video renderer** for high-quality animations
 - **Data conversion tools** to transform simulation output to visualization format
 - **Pipeline runner** for automated workflows
+- **Modular rendering engine** with shader support (game-engine-like architecture)
+
+## Architecture
+
+The visualization system is built on a modular, game-engine-like rendering framework:
+
+- **Core Engine** (`core/`): Data management, shader system, rendering engine, cameras
+- **Render Passes** (`passes/`): Volume rendering, contour rendering, isosurfaces
+- **Renderers** (`renderers/`): High-level renderer implementations
+- **Shaders** (`shaders/`): Organized shader library with support for custom shaders
+
+See [ENGINE_GUIDE.md](ENGINE_GUIDE.md) for detailed documentation on the modular system.
 
 ## Quick Start
 
@@ -38,7 +50,14 @@ pip install zarr numpy moderngl moderngl-window pillow tqdm
 
 3. **Render video:**
    ```bash
+   # Standard color visualization
    python visualization/render_supercell_3d.py --input data/supercell.zarr --output storm.mp4
+   
+   # Scientific-style (grayscale)
+   python visualization/run_3d_pipeline.py --render-video --scientific --output scientific.mp4
+   
+   # Custom shader
+   python -m visualization.renderers.offline_renderer --input data/supercell.zarr --shader volume_grayscale --output gray.mp4
    ```
 
 4. **Run complete pipeline:**
@@ -48,15 +67,26 @@ pip install zarr numpy moderngl moderngl-window pillow tqdm
 
 ## Files
 
-### Core Components
-- `supercell_renderer.py` - Interactive 3D OpenGL viewer with volume ray marching
-- `render_supercell_3d.py` - Offline video renderer for high-quality animations
-- `convert_npy_to_zarr.py` - Data conversion from NPY exports to Zarr format (includes diagnostics)
-- `run_3d_pipeline.py` - Automated pipeline runner (includes quick start guide)
+### Entry Points (User-Facing Scripts)
+- `supercell_renderer.py` - Interactive 3D OpenGL viewer (uses new engine internally)
+- `render_supercell_3d.py` - Offline video renderer (uses new engine internally)
+- `run_3d_pipeline.py` - Automated pipeline runner with quick-start guide
+- `convert_npy_to_zarr.py` - Data conversion from NPY exports to Zarr format
+- `create_animation.py` - Simple 2D matplotlib animation (fallback, no OpenGL required)
 
-### Shaders
-- `shaders/volume.vert` - Vertex shader for volume rendering
-- `shaders/volume.frag` - Fragment shader with ray marching algorithm
+### Modular Engine Components
+- `core/` - Core engine (DataManager, ShaderManager, RenderEngine, Camera, TransferFunction)
+- `renderers/` - High-level renderer implementations
+- `passes/` - Render pass implementations (volume, contour)
+- `examples/` - Example visualizations (scientific style)
+
+### Shader Library
+- `shaders/volume/` - Volume rendering shaders
+  - `volume.vert` - Base vertex shader
+  - `volume_color.frag` - Color transfer function
+  - `volume_grayscale.frag` - Grayscale (scientific style)
+- `shaders/contour/` - Contour rendering shaders
+- `shaders/common/` - Shared utilities (lighting, utils)
 
 ## Controls
 
@@ -111,14 +141,66 @@ pip install --upgrade zarr numpy moderngl moderngl-window pillow tqdm
 
 ## Advanced Usage
 
+### Using the Modular Engine
+
+The visualization system now uses a modular engine internally. Advanced users can:
+
+```python
+from visualization.renderers.offline_renderer import OfflineRenderer
+
+# Create renderer with custom shader
+renderer = OfflineRenderer("data/supercell.zarr", shader="volume_grayscale")
+renderer.render_animation("output.mp4")
+```
+
+### Custom Shaders
+
+Add custom shaders by placing `.frag` files in `shaders/volume/`:
+
+```bash
+# Your custom shader
+visualization/shaders/volume/my_custom.frag
+
+# Use it
+python -m visualization.renderers.offline_renderer --input data.zarr --shader my_custom
+```
+
+Shaders support `#include` directives for shared code:
+```glsl
+#include "common/utils.glsl"
+#include "common/lighting.glsl"
+```
+
 ### Custom Transfer Functions
-Modify `shaders/volume.frag` to customize color mapping and opacity.
+
+Create custom transfer functions:
+```python
+from visualization.core.transfer_function import CustomTransferFunction
+
+def my_tf(primary_field, secondary_fields, timestep):
+    # Your custom logic
+    return rgba_data
+
+tf = CustomTransferFunction(my_tf)
+renderer.set_transfer_function(tf)
+```
+
+### Scientific Style Visualization
+
+For Lewellen et al. (2008) style visualizations:
+```bash
+python -m visualization.examples.scientific_style --input data.zarr --output scientific.mp4
+```
 
 ### Camera Paths
-Extend `supercell_renderer.py` with custom camera trajectories.
+Use the Camera system for custom camera trajectories:
+```python
+from visualization.core.camera import OrbitCamera, ScientificCamera
 
-### Multi-Field Visualization
-Add new fields to the transfer function in the fragment shader.
+camera = ScientificCamera()
+camera.set_side_view()  # Side view for downdraft visualization
+renderer.set_camera(camera)
+```
 
 ## Troubleshooting
 
@@ -153,11 +235,21 @@ The converter produces Zarr files with structure:
 ```
 storm.zarr/
 ├── theta/     # float32[time, z, y, x] - potential temperature
+├── qv/        # float32[time, z, y, x] - water vapor mixing ratio
+├── qc/        # float32[time, z, y, x] - cloud water mixing ratio
 ├── qr/        # float32[time, z, y, x] - rain mixing ratio
+├── qh/        # float32[time, z, y, x] - hail mixing ratio
+├── qg/        # float32[time, z, y, x] - graupel mixing ratio
 ├── u/, v/, w/ # float32[time, z, y, x] - wind components
+├── rho/       # float32[time, z, y, x] - density
+├── p/         # float32[time, z, y, x] - pressure
+├── reflectivity_dbz/ # float32[time, z, y, x] - radar reflectivity (note: exported as "radar")
+├── tracer/    # float32[time, z, y, x] - passive tracer
 ├── x, y, z    # float32[x/y/z] - coordinate arrays
 └── attrs      # metadata (dx, dy, dz, etc.)
 ```
+
+**Note on Field Name Mapping**: The simulation exports radar reflectivity as `radar`, but the converter automatically maps it to `reflectivity_dbz` in the Zarr file for consistency with visualization tools.
 
 ## Available Fields
 
@@ -168,6 +260,9 @@ The visualization system can render the following atmospheric fields (when avail
 - **qv** - Water vapor mixing ratio
 - **qc** - Cloud water mixing ratio
 - **qr** - Rain water mixing ratio
+- **qh** - Hail mixing ratio
+- **qg** - Graupel mixing ratio
+- **tracer** - Passive tracer field
 
 ### Wind Fields
 - **u, v, w** - Wind components (radial, azimuthal, vertical)
@@ -196,7 +291,9 @@ python run_3d_pipeline.py --input data/supercell.zarr --output videos/ --formats
 ```
 
 ### Custom Transfer Functions
-Modify `shaders/volume.frag` to customize how different fields are mapped to colors and opacity.
+Modify `shaders/volume/volume_color.frag` or create new shaders in `shaders/volume/` to customize how different fields are mapped to colors and opacity.
+
+See [ENGINE_GUIDE.md](ENGINE_GUIDE.md) for detailed shader customization guide.
 
 ## Field Mapping in Shaders
 
@@ -219,8 +316,22 @@ If a field you expect isn't available:
 - Limit `--max_timesteps` to reduce memory usage
 - Use lower resolution for interactive exploration
 
+## Field Discovery
+
+The visualization system automatically discovers available fields from simulation output (source-of-truth alignment). No hardcoded field lists - the system adapts to whatever fields your simulation exports.
+
+```python
+from visualization.core.data_manager import DataManager
+
+data_mgr = DataManager("data/supercell.zarr")
+available_fields = data_mgr.list_available_fields()
+print(f"Available: {available_fields}")
+```
+
 ## See Also
 
+- [ENGINE_GUIDE.md](ENGINE_GUIDE.md) - Complete guide to the modular rendering engine
+- [README_ENGINE.md](README_ENGINE.md) - Implementation summary
 - `../docs/foundationalScience.md` - Scientific foundation and literature references
 - `../docs/3d_visualization_guide.md` - Complete technical documentation
 - `../README.md` - Project overview and setup instructions

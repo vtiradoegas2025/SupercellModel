@@ -27,8 +27,6 @@ struct ScharResult {
 ScharResult eval_schar(double x, const TerrainConfig::ScharParams& params);
 
 // Terrain-following coordinate transformations
-// TODO: Implement terrain coordinate transformations - commented out due to compilation issues
-/*
 class TerrainFollowingCoordinate {
 private:
     TerrainConfig config_;
@@ -50,7 +48,6 @@ public:
     // Smoothed coordinate surfaces (optional)
     double apply_coordinate_smoothing(double h, double zeta) const;
 };
-*/
 
 // Initialize 2D topography field
 void initialize_topography(Topography2D& topo, int NR, int NTH);
@@ -63,3 +60,5 @@ std::vector<double> build_zeta_levels(int NZ, double ztop);
 
 // Check coordinate validity (no folding)
 bool check_coordinate_validity(const TerrainMetrics3D& metrics, TerrainDiagnostics& diag);
+
+} // namespace topography

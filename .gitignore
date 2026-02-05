@@ -29,3 +29,6 @@ tests/
 
 # Specific files
 .venv/lib/python3.12/site-packages/fontTools/ufoLib/validators.py
+
+# Project status (local development context)
+STATUS.md

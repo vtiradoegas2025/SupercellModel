@@ -1,6 +1,10 @@
 #include "zdr.hpp"
+#include "field3d.hpp"
 #include <cmath>
 #include <iostream>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 /*This function initializes the ZDR scheme.
 Takes in the configuration, the number of rows, the number of columns, 
@@ -236,12 +240,13 @@ float ZDRScheme::estimate_rain_axis_ratio(float q_rain)
 
 /*This function computes the polarimetric rain.
 Takes in the rain quantity and the output and computes the polarimetric rain.*/
-void ZDRScheme::compute_polarimetric_rain(const std::vector<std::vector<std::vector<float>>>& q_rain, RadarOut& out) 
+void ZDRScheme::compute_polarimetric_rain(const Field3D& q_rain, RadarOut& out) 
 {
     // Polarimetric calculation for rain drops (oblate spheroids)
     // Based on Jung et al. (2008) style forward operator
 
     // Iterate over the rows, columns, and vertical levels and compute the polarimetric rain.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR_; ++i) 
     {
         // Iterate over the columns and vertical levels and compute the polarimetric rain.
@@ -251,7 +256,7 @@ void ZDRScheme::compute_polarimetric_rain(const std::vector<std::vector<std::vec
             for (int k = 0; k < NZ_; ++k) 
             {
                 // Get the rain quantity.
-                float q_val = q_rain[i][j][k];
+                float q_val = static_cast<float>(q_rain[i][j][k]);
 
                 // If the rain quantity is less than or equal to 0, skip.
                 if (q_val <= 0.0f) 
@@ -299,7 +304,7 @@ void ZDRScheme::compute_polarimetric_rain(const std::vector<std::vector<std::vec
 
 /*This function computes the polarimetric ice.
 Takes in the ice quantity, the species, and the output and computes the polarimetric ice.*/
-void ZDRScheme::compute_polarimetric_ice(const std::vector<std::vector<std::vector<float>>>& q_ice,
+void ZDRScheme::compute_polarimetric_ice(const Field3D& q_ice,
                                          const std::string& species, RadarOut& out) {
     // Simplified polarimetric calculation for ice species
     // Ice particles are generally less oriented and have different polarimetric properties
@@ -312,6 +317,7 @@ void ZDRScheme::compute_polarimetric_ice(const std::vector<std::vector<std::vect
     else rho_hyd = 917.0;  // ice
 
     // Iterate over the rows, columns, and vertical levels and compute the polarimetric ice.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR_; ++i) 
     {
         // Iterate over the columns and vertical levels and compute the polarimetric ice.
@@ -320,7 +326,7 @@ void ZDRScheme::compute_polarimetric_ice(const std::vector<std::vector<std::vect
 
             for (int k = 0; k < NZ_; ++k) 
             {
-                float q_val = q_ice[i][j][k];
+                float q_val = static_cast<float>(q_ice[i][j][k]);
 
                 // If the ice quantity is less than or equal to 0, skip.
                 if (q_val <= 0.0f) 

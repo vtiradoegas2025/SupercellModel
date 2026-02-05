@@ -1,4 +1,5 @@
 #include "schar.hpp"
+#include "simulation.hpp"
 #include <iostream>
 #include <cmath>
 

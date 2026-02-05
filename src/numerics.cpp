@@ -27,16 +27,25 @@ void initialize_numerics() {
         global_grid_metrics.z_int[k] = global_grid_metrics.z_int[k-1] + dz;
     }
 
-    // Initialize advection scheme (default TVD)
-    advection_scheme = create_advection_scheme("tvd");
+    // Initialize advection scheme (use config if set, default TVD)
+    if (global_advection_config.scheme_id.empty()) {
+        global_advection_config.scheme_id = "tvd";
+    }
+    advection_scheme = create_advection_scheme(global_advection_config.scheme_id);
     advection_scheme->initialize(global_advection_config);
 
-    // Initialize diffusion scheme (default explicit)
-    diffusion_scheme = create_diffusion_scheme("explicit");
+    // Initialize diffusion scheme (use config if set, default explicit)
+    if (global_diffusion_config.scheme_id.empty()) {
+        global_diffusion_config.scheme_id = "explicit";
+    }
+    diffusion_scheme = create_diffusion_scheme(global_diffusion_config.scheme_id);
     diffusion_scheme->initialize(global_diffusion_config);
 
-    // Initialize time stepping scheme (default RK3)
-    time_stepping_scheme = create_time_stepping_scheme("rk3");
+    // Initialize time stepping scheme (use config if set, default RK3)
+    if (global_time_stepping_config.scheme_id.empty()) {
+        global_time_stepping_config.scheme_id = "rk3";
+    }
+    time_stepping_scheme = create_time_stepping_scheme(global_time_stepping_config.scheme_id);
 
     std::cout << "Initialized numerics framework:" << std::endl;
     std::cout << "  Advection: " << advection_scheme->name() << std::endl;

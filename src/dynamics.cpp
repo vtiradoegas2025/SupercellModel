@@ -4,6 +4,9 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 
 /*This file contains the implementation of the dynamics scheme.
@@ -13,21 +16,21 @@ It manages the initialization of the dynamics scheme and the computation of the 
 std::unique_ptr<DynamicsScheme> dynamics_scheme = nullptr;
 
 // Vorticity diagnostic fields
-std::vector<std::vector<std::vector<float>>> vorticity_r;
-std::vector<std::vector<std::vector<float>>> vorticity_theta;
-std::vector<std::vector<std::vector<float>>> vorticity_z;
-std::vector<std::vector<std::vector<float>>> stretching_term;
-std::vector<std::vector<std::vector<float>>> tilting_term;
-std::vector<std::vector<std::vector<float>>> baroclinic_term;
+Field3D vorticity_r;
+Field3D vorticity_theta;
+Field3D vorticity_z;
+Field3D stretching_term;
+Field3D tilting_term;
+Field3D baroclinic_term;
 
 // Angular momentum diagnostics
-std::vector<std::vector<std::vector<float>>> angular_momentum;
-std::vector<std::vector<std::vector<float>>> angular_momentum_tendency;
+Field3D angular_momentum;
+Field3D angular_momentum_tendency;
 
 // Pressure diagnostics
-std::vector<std::vector<std::vector<float>>> p_prime;
-std::vector<std::vector<std::vector<float>>> dynamic_pressure;
-std::vector<std::vector<std::vector<float>>> buoyancy_pressure;
+Field3D p_prime;
+Field3D dynamic_pressure;
+Field3D buoyancy_pressure;
 
 /*This function initializes the dynamics scheme.
 Takes in the scheme name and initializes the dynamics scheme.*/
@@ -39,17 +42,17 @@ void initialize_dynamics(const std::string& scheme_name)
         std::cout << "Initialized dynamics scheme: " << scheme_name << std::endl;
 
         // Resize diagnostic fields
-        vorticity_r.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        vorticity_theta.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        vorticity_z.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        stretching_term.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        tilting_term.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        baroclinic_term.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        angular_momentum.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        angular_momentum_tendency.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        p_prime.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        dynamic_pressure.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        buoyancy_pressure.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+        vorticity_r.resize(NR, NTH, NZ, 0.0f);
+        vorticity_theta.resize(NR, NTH, NZ, 0.0f);
+        vorticity_z.resize(NR, NTH, NZ, 0.0f);
+        stretching_term.resize(NR, NTH, NZ, 0.0f);
+        tilting_term.resize(NR, NTH, NZ, 0.0f);
+        baroclinic_term.resize(NR, NTH, NZ, 0.0f);
+        angular_momentum.resize(NR, NTH, NZ, 0.0f);
+        angular_momentum_tendency.resize(NR, NTH, NZ, 0.0f);
+        p_prime.resize(NR, NTH, NZ, 0.0f);
+        dynamic_pressure.resize(NR, NTH, NZ, 0.0f);
+        buoyancy_pressure.resize(NR, NTH, NZ, 0.0f);
 
     } 
     catch (const std::runtime_error& e) 
@@ -70,14 +73,14 @@ void step_dynamics_new(double dt_dynamics, double current_time)
         step_dynamics_old(current_time); // Fall back to old dynamics
         return;
     }
-
+    
     // Create temporary arrays for tendencies
-    std::vector<std::vector<std::vector<float>>> du_r_dt(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    std::vector<std::vector<std::vector<float>>> du_theta_dt(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    std::vector<std::vector<std::vector<float>>> du_z_dt(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    std::vector<std::vector<std::vector<float>>> drho_dt(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    std::vector<std::vector<std::vector<float>>> dp_dt(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-
+    Field3D du_r_dt(NR, NTH, NZ, 0.0f);
+    Field3D du_theta_dt(NR, NTH, NZ, 0.0f);
+    Field3D du_z_dt(NR, NTH, NZ, 0.0f);
+    Field3D drho_dt(NR, NTH, NZ, 0.0f);
+    Field3D dp_dt(NR, NTH, NZ, 0.0f);
+    
     // Compute tendencies using the dynamics scheme
     dynamics_scheme->compute_momentum_tendencies(
         u, v_theta, w, rho, p, theta, dt_dynamics,
@@ -85,6 +88,7 @@ void step_dynamics_new(double dt_dynamics, double current_time)
     );
 
     //Iterate over all grid points and apply tendencies
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         //Iterate over all azimuthal angles
@@ -103,8 +107,9 @@ void step_dynamics_new(double dt_dynamics, double current_time)
         }
     }
 
-    // Apply radiation (updates theta tendencies)
-    step_radiation(current_time);
+    // NOTE: Radiation is now called in the main loop, not here
+    // This prevents double-calling radiation per timestep
+    // step_radiation(current_time);  // REMOVED - called in main loop
 
     // Apply microphysics at the same timestep as dynamics
     step_microphysics(dt_dynamics);
@@ -115,6 +120,7 @@ void step_dynamics_new(double dt_dynamics, double current_time)
     // Apply subgrid turbulence
     TurbulenceTendencies turb_tend;
     step_turbulence(current_time, turb_tend);
+    
     // Add turbulence tendencies to momentum and scalars
 
     // Iterate over the rows, columns, and levels and add the turbulence tendencies to the momentum and scalars.
@@ -140,7 +146,8 @@ void step_dynamics_new(double dt_dynamics, double current_time)
                 // If the TKE field is not set, return.
                 if (!tke.empty()) {
                     tke[i][j][k] += turb_tend.dtkedt_sgs[i][j][k] * dt_dynamics;
-                    tke[i][j][k] = std::max(0.001f, tke[i][j][k]);  // ensure positive TKE
+                    float tke_val = tke[i][j][k];
+                    tke[i][j][k] = std::max(0.001f, tke_val);  // ensure positive TKE
                 }
             }
         }
@@ -265,7 +272,7 @@ void step_dynamics(double current_time)
 /*This function steps the dynamics forward in time using the old dynamics system.
 Takes in the current time and steps the dynamics forward in time using the old dynamics system.*/
 void step_dynamics_old(double current_time)
-
+{
     // If the dynamics scheme is set, step the dynamics forward in time using the new modular dynamics system.
     if (dynamics_scheme)
     {
@@ -280,6 +287,7 @@ void step_dynamics_old(double current_time)
     double max_speed = 1e-6;
 
     // Iterate over the rows, columns, and levels and compute the maximum speed.
+    #pragma omp parallel for collapse(2) reduction(max:max_speed)
     for (int i = 1; i < NR - 1; ++i) 
     {
         // Iterate over the columns and compute the maximum speed.
@@ -290,6 +298,7 @@ void step_dynamics_old(double current_time)
             {
                 double sp = std::max({std::abs((double)u[i][j][k]), std::abs((double)w[i][j][k]), std::abs((double)v_theta[i][j][k])});
                 if (sp > max_speed) max_speed = sp; 
+            }
         }
     }
 
@@ -367,18 +376,27 @@ void step_dynamics_old(double current_time)
                 }
 
                 // Apply bounds
-                p[i][j][k] = std::max(1000.0f, std::min(200000.0f, p[i][j][k]));
-                theta[i][j][k] = std::max(200.0f, std::min(500.0f, theta[i][j][k]));
-                u[i][j][k] = std::max(-100.0f, std::min(100.0f, u[i][j][k]));
-                w[i][j][k] = std::max(-50.0f, std::min(50.0f, w[i][j][k]));
-                v_theta[i][j][k] = std::max(-100.0f, std::min(100.0f, v_theta[i][j][k]));
+                float p_val = p[i][j][k];
+                p[i][j][k] = std::max(1000.0f, std::min(200000.0f, p_val));
+                float theta_val = theta[i][j][k];
+                theta[i][j][k] = std::max(200.0f, std::min(500.0f, theta_val));
+                float u_val = u[i][j][k];
+                u[i][j][k] = std::max(-100.0f, std::min(100.0f, u_val));
+                float w_val = w[i][j][k];
+                w[i][j][k] = std::max(-50.0f, std::min(50.0f, w_val));
+                float v_val = v_theta[i][j][k];
+                v_theta[i][j][k] = std::max(-100.0f, std::min(100.0f, v_val));
             }
         }
     }
 
-    // Re-enable advection and microphysics
+    // Re-enable advection and microphysics (now using stable advection component)
+    std::cerr << "[DYNAMICS] About to call advect_thermodynamics with dt_eff=" << dt_eff << std::endl;
+    std::cerr.flush();
     advect_tracer(dt_eff);
     advect_thermodynamics(dt_eff);
+    std::cerr << "[DYNAMICS] After advect_thermodynamics" << std::endl;
+    std::cerr.flush();
     step_microphysics(dt_eff);
 
     // Apply boundary conditions (from old implementation)

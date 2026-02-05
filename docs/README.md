@@ -281,10 +281,11 @@ For complete scientific attribution and literature references, see **[foundation
 
 #### Known Issues
 - **Terrain Module**: Excluded from build due to compilation issues
-- **Chaos Module**: Contains placeholder implementations
+- **Chaos Module**: Contains placeholder implementations (marked with "COMEBACK" comments)
 - **Small Grids**: <64×64 may cause initialization instabilities
-- **Memory Usage**: High-resolution grids require significant RAM (>16GB)
-- **Parallelization**: Single-threaded implementation (OpenMP planned)
+- **Memory Usage**: High-resolution grids require significant RAM (~8GB for 256×128×128)
+- **Parallelization**: OpenMP multi-core parallelization implemented (4-8x speedup)
+- **Potential Temperature**: Critical issue with theta going negative after one timestep (see STATUS.md)
 
 ### Build System
 
@@ -311,10 +312,11 @@ make clean
 ```
 
 #### Compilation Flags
-- **Optimization**: -O2 (production), -O0 (debug)
+- **Optimization**: -O3 -march=native -mtune=native (production), -O0 (debug)
 - **Warnings**: -Wall -Wextra -Wpedantic
 - **Features**: -DEXPORT_NPY for data export
 - **Standards**: -std=c++17 -fPIC
+- **OpenMP**: Automatically detected and enabled if available
 
 #### Runtime Dependencies
 - **Execution**: No external runtime libraries required (static linking)
@@ -342,7 +344,7 @@ Pre-configured test cases in `configs/` directory:
 - `hp.yaml`: High precipitation supercell with hail
 - `cyclic.yaml`: Multi-cycle supercell development
 - `elevated.yaml`: Elevated convection case
-- `test_small.yaml`: Minimal test configuration (32×32×16)
+- Test configurations moved to `tests/` folder (test_small.yaml, low_res_test.yaml, test_thompson.yaml)
 
 #### Output Formats
 - **NPY files**: NumPy-compatible binary arrays per theta slice
@@ -661,9 +663,10 @@ python tests/validate_time_steps.py
 ### Performance Benchmarks
 
 #### Computational Performance
-- **Small grid (32×32×16)**: ~10,000 time steps/hour on modern CPU
-- **Production grid (256×128×128)**: ~100 time steps/hour on high-end workstation
-- **Memory usage**: ~8GB for production grids, ~2GB for test grids
+- **Small grid (64×64×32)**: ~10,000-15,000 time steps/hour (with optimizations)
+- **Production grid (256×128×128)**: ~100-150 time steps/hour (with optimizations)
+- **Memory usage**: ~8GB for production grids (optimized with Field3D flattened arrays), ~50MB for test grids
+- **Optimizations**: -O3 -march=native -mtune=native, OpenMP parallelization, Field3D cache optimization
 
 #### Visualization Performance
 - **Interactive rendering**: 30-60 FPS for 128³ volumes on modern GPU

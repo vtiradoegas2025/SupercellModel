@@ -1,6 +1,9 @@
 #include "lin.hpp"
 #include <algorithm>
 #include <cmath>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 
 /* This is the constructor for the Lin scheme. This is simplified for the purpose of this project
@@ -28,49 +31,49 @@ cloud water mixing ratio, rainwater mixing ratio, ice mixing ratio,
 snow mixing ratio, graupel mixing ratio, hail mixing ratio,
 and the time step and computes the tendencies for the Lin scheme.*/
 void LinScheme::compute_tendencies(
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& theta,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
+    const Field3D& p,
+    const Field3D& theta,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
     double dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqi_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt
+    Field3D& dtheta_dt,
+    Field3D& dqv_dt,
+    Field3D& dqc_dt,
+    Field3D& dqr_dt,
+    Field3D& dqi_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt
 ) 
 {
     // Get grid size
-    int NR = p.size();
+    int NR = p.size_r();
     if (NR == 0) return;
-    int NTH = p[0].size();
-    int NZ = p[0][0].size();
+    int NTH = p.size_th();
+    int NZ = p.size_z();
 
     // Convert theta to temperature for microphysics calculations by iterating over all grid points
-    std::vector<std::vector<std::vector<float>>> temperature;
+    Field3D temperature(NR, NTH, NZ);
     thermodynamics::convert_theta_to_temperature_field(theta, p, temperature);
 
     // Initialize tendency arrays to zero
-    dtheta_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqv_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqc_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqr_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqi_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqs_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqg_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqh_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    dtheta_dt.resize(NR, NTH, NZ, 0.0f);
+    dqv_dt.resize(NR, NTH, NZ, 0.0f);
+    dqc_dt.resize(NR, NTH, NZ, 0.0f);
+    dqr_dt.resize(NR, NTH, NZ, 0.0f);
+    dqi_dt.resize(NR, NTH, NZ, 0.0f);
+    dqs_dt.resize(NR, NTH, NZ, 0.0f);
+    dqg_dt.resize(NR, NTH, NZ, 0.0f);
+    dqh_dt.resize(NR, NTH, NZ, 0.0f);
 
     // Saturation adjustment (cloud condensation)
-    auto qv_temp = qv;
-    auto qc_temp = qc;
+    Field3D qv_temp = qv;
+    Field3D qc_temp = qc;
     saturation_adjustment(temperature, p, qv_temp, qc_temp);
 
     // Compute microphysical processes
@@ -92,7 +95,7 @@ void LinScheme::compute_tendencies(
                 // Convert temperature tendency to potential temperature tendency
                 dtheta_dt[i][j][k] = static_cast<float>(
                     thermodynamics::temperature_tendency_to_theta(
-                        dtheta_dt[i][j][k], theta[i][j][k], p[i][j][k]
+                        static_cast<float>(dtheta_dt[i][j][k]), static_cast<float>(theta[i][j][k]), static_cast<float>(p[i][j][k])
                     )
                 );
             }
@@ -105,18 +108,19 @@ void LinScheme::compute_tendencies(
 Takes in the temperature, pressure, vapor mixing ratio, and cloud water 
 mixing ratio and computes the saturation adjustment for the Lin scheme.*/
 void LinScheme::saturation_adjustment(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    std::vector<std::vector<std::vector<float>>>& qv,
-    std::vector<std::vector<std::vector<float>>>& qc
+    const Field3D& temperature,
+    const Field3D& p,
+    Field3D& qv,
+    Field3D& qc
 ) 
 {
     // Get the number of rows, columns, and levels.
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points to compute the saturation adjustment.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -126,14 +130,15 @@ void LinScheme::saturation_adjustment(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get the temperature, pressure, and vapor mixing ratio
-                float T = temperature[i][j][k];
-                float P = p[i][j][k];
+                float T = static_cast<float>(temperature[i][j][k]);
+                float P = static_cast<float>(p[i][j][k]);
                 float qvsat = thermodynamics::saturation_mixing_ratio_water(T, P);
 
                 // If the vapor mixing ratio is greater than the saturation vapor mixing ratio, compute the saturation adjustment.
-                if (qv[i][j][k] > qvsat) 
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                if (qv_val > qvsat) 
                 {
-                    float excess = qv[i][j][k] - qvsat;
+                    float excess = qv_val - qvsat;
                     qc[i][j][k] += excess;
                     qv[i][j][k] = qvsat;
                 }
@@ -148,23 +153,24 @@ Takes in the temperature, pressure, vapor mixing ratio, cloud water mixing ratio
 rainwater mixing ratio, and the tendencies for the cloud water, rainwater, 
 and vapor mixing ratios and computes the warm rain processes for the Lin scheme.*/
 void LinScheme::compute_warm_rain_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt
+    const Field3D& temperature,
+    const Field3D& p,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    Field3D& dqc_dt,
+    Field3D& dqr_dt,
+    Field3D& dqv_dt,
+    Field3D& dtheta_dt
 ) 
 {
     // Get grid size
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points to compute the warm rain processes.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -174,11 +180,11 @@ void LinScheme::compute_warm_rain_processes(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qc_val = qc[i][j][k];
-                float qr_val = qr[i][j][k];
-                float qv_val = qv[i][j][k];
-                float T = temperature[i][j][k];
-                float P = p[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
+                float P = static_cast<float>(p[i][j][k]);
 
                 // If the cloud water mixing ratio is greater than the critical cloud water mixing ratio, compute the autoconversion rate.
                 // Autoconversion: qc → qr
@@ -231,29 +237,30 @@ rainwater mixing ratio, ice mixing ratio, snow mixing ratio, graupel mixing rati
 and the tendencies for the cloud water, graupel, hail, and vapor mixing ratios
 and computes the ice processes for the Lin scheme.*/
 void LinScheme::compute_ice_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqi_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt
+    const Field3D& temperature,
+    const Field3D& p,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqc_dt,
+    Field3D& dqi_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dqv_dt,
+    Field3D& dtheta_dt
 ) 
 {
     // Get grid size
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // For each row, azimuthal point, and vertical point, compute the ice processes.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -263,14 +270,14 @@ void LinScheme::compute_ice_processes(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qc_val = qc[i][j][k];
-                float qi_val = qi[i][j][k];
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
-                float qv_val = qv[i][j][k];
-                float T = temperature[i][j][k];
-                float P = p[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qi_val = static_cast<float>(qi[i][j][k]);
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
+                float P = static_cast<float>(p[i][j][k]);
                 float T_celsius = T - microphysics_constants::T0;
 
                 // If the temperature is less than the freezing temperature and the cloud water mixing ratio is greater than 0, compute the ice nucleation rate.
@@ -380,22 +387,23 @@ Takes in the temperature, snow mixing ratio, graupel mixing ratio, hail mixing r
 and the tendencies for the snow, graupel, hail, and rainwater mixing ratios
 and computes the melting processes for the Lin scheme.*/
 void LinScheme::compute_melting_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt
+    const Field3D& temperature,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dqr_dt,
+    Field3D& dtheta_dt
 ) 
 {
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Compute melting processes by iterating over all grid points
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -405,10 +413,10 @@ void LinScheme::compute_melting_processes(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
-                float T = temperature[i][j][k];
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
 
                 // If the temperature is greater than the freezing temperature, compute the melting rate.
                 if (T > microphysics_constants::T0) 
@@ -454,23 +462,24 @@ Takes in the rainwater mixing ratio, snow mixing ratio, graupel mixing ratio,
 hail mixing ratio, and the tendencies for the rainwater, snow, graupel, 
 and hail mixing ratios and computes the sedimentation for the Lin scheme.*/
 void LinScheme::compute_sedimentation(
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt
+    const Field3D& qr,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqr_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt
 ) 
 {
     // Get the number of rows, columns, and levels.
-    int NR = qr.size();
-    int NTH = qr[0].size();
-    int NZ = qr[0][0].size();
+    int NR = qr.size_r();
+    int NTH = qr.size_th();
+    int NZ = qr.size_z();
     const double dz = 100.0;
 
     // Iterate over all grid points to compute the sedimentation.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -480,41 +489,45 @@ void LinScheme::compute_sedimentation(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Rain sedimentation
-                if (qr[i][j][k] > 0.0f && k > 0) 
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                if (qr_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    float Vt = a_r_ * std::pow(std::max(qr[i][j][k], 1e-6f), b_r_);
-                    float sed_flux = Vt * qr[i][j][k];
+                    float Vt = a_r_ * std::pow(std::max(qr_val, 1e-6f), b_r_);
+                    float sed_flux = Vt * qr_val;
                     dqr_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqr_dt[i][j][k + 1] += sed_flux / dz;
                 }
 
                 // If the snow mixing ratio is greater than 0 and the vertical level is greater than 0, compute the sedimentation rate.
-                if (qs[i][j][k] > 0.0f && k > 0) 
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                if (qs_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    float Vt = a_s_ * std::pow(std::max(qs[i][j][k], 1e-6f), b_s_);
-                    float sed_flux = Vt * qs[i][j][k];
+                    float Vt = a_s_ * std::pow(std::max(qs_val, 1e-6f), b_s_);
+                    float sed_flux = Vt * qs_val;
                     dqs_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqs_dt[i][j][k + 1] += sed_flux / dz;
                 }
 
                 // If the graupel mixing ratio is greater than 0 and the vertical level is greater than 0, compute the sedimentation rate.
-                if (qg[i][j][k] > 0.0f && k > 0) 
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                if (qg_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    float Vt = a_g_ * std::pow(std::max(qg[i][j][k], 1e-6f), b_g_);
-                    float sed_flux = Vt * qg[i][j][k];
+                    float Vt = a_g_ * std::pow(std::max(qg_val, 1e-6f), b_g_);
+                    float sed_flux = Vt * qg_val;
                     dqg_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqg_dt[i][j][k + 1] += sed_flux / dz;
                 }
 
                 // If the hail mixing ratio is greater than 0 and the vertical level is greater than 0, compute the sedimentation rate.
-                if (qh[i][j][k] > 0.0f && k > 0) 
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                if (qh_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    float Vt = a_h_ * std::pow(std::max(qh[i][j][k], 1e-6f), b_h_);
-                    float sed_flux = Vt * qh[i][j][k];
+                    float Vt = a_h_ * std::pow(std::max(qh_val, 1e-6f), b_h_);
+                    float sed_flux = Vt * qh_val;
                     dqh_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqh_dt[i][j][k + 1] += sed_flux / dz;
                 }
@@ -529,22 +542,22 @@ Takes in the cloud water mixing ratio, rainwater mixing ratio, ice mixing ratio,
 graupel mixing ratio, hail mixing ratio, and the radar reflectivity field
 and computes the radar reflectivity for the Lin scheme.*/
 void LinScheme::compute_radar_reflectivity(
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& reflectivity_dbz
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& reflectivity_dbz
 ) 
 {
     // Get grid size
-    int NR = qc.size();
+    int NR = qc.size_r();
     if (NR == 0) return;
-    int NTH = qc[0].size();
-    int NZ = qc[0][0].size();
+    int NTH = qc.size_th();
+    int NZ = qc.size_z();
 
-    reflectivity_dbz.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    reflectivity_dbz.resize(NR, NTH, NZ, 0.0f);
 
     // Lin scheme reflectivity constants
     const float K_qc = 0.1e-3f;
@@ -557,6 +570,7 @@ void LinScheme::compute_radar_reflectivity(
     const float Z_min = 1e-10f;
 
     // Iterate over all grid points to compute the radar reflectivity.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -566,12 +580,12 @@ void LinScheme::compute_radar_reflectivity(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qc_val = qc[i][j][k];
-                float qr_val = qr[i][j][k];
-                float qi_val = qi[i][j][k];
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float qi_val = static_cast<float>(qi[i][j][k]);
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
 
                 float Z_linear = K_qc * std::pow(std::max(qc_val, 0.0f), alpha) +
                                 K_qr * std::pow(std::max(qr_val, 0.0f), alpha) +

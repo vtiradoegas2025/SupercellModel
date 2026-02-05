@@ -96,9 +96,25 @@ def run_pipeline(args):
         else:
             print("\n=== Step 3: Offline Video Rendering ===")
             output_file = args.output or f"supercell_{args.field}.mp4"
-            cmd = f"cd {base_dir} && python visualization/render_supercell_3d.py --input {zarr_path} --output {output_file} --fps {args.fps} --speed {args.speed}"
-            if args.duration:
-                cmd += f" --duration {args.duration}"
+            
+            # Use scientific style renderer if requested
+            if args.scientific:
+                print("Using scientific-style visualization (grayscale)")
+                cmd = f"cd {base_dir} && python -m visualization.examples.scientific_style --input {zarr_path} --output {output_file} --fps {args.fps}"
+                if args.max_timesteps:
+                    cmd += f" --max-timesteps {args.max_timesteps}"
+            else:
+                # Use standard renderer
+                cmd = f"cd {base_dir} && python visualization/render_supercell_3d.py --input {zarr_path} --output {output_file} --fps {args.fps} --speed {args.speed}"
+                if args.duration:
+                    cmd += f" --duration {args.duration}"
+                if args.shader:
+                    # Note: render_supercell_3d.py doesn't have --shader yet, but new renderer does
+                    # For now, use new renderer directly if shader is specified
+                    print(f"Using shader: {args.shader}")
+                    cmd = f"cd {base_dir} && python -m visualization.renderers.offline_renderer --input {zarr_path} --output {output_file} --field {args.field} --shader {args.shader} --fps {args.fps} --speed {args.speed}"
+                    if args.duration:
+                        cmd += f" --duration {args.duration}"
 
             success &= run_command(cmd, f"Rendering video to {output_file}")
 
@@ -234,6 +250,7 @@ Controls:
             print("Close the window when done to continue with video rendering.")
 
             # Launch viewer (this will block until user closes it)
+            # Updated scripts now use new engine internally
             cmd = "python visualization/supercell_renderer.py --input data/supercell.zarr --field theta"
             try:
                 subprocess.run(cmd, shell=True, check=True)
@@ -242,6 +259,7 @@ Controls:
                 print("Viewer interrupted by user")
             except subprocess.CalledProcessError as e:
                 print(f"Viewer failed: {e}")
+                print("Note: Updated renderer uses new modular engine internally")
         else:
             print("Skipping interactive viewer")
     except (EOFError, KeyboardInterrupt):
@@ -257,10 +275,12 @@ This will render a 15-second video at 30 FPS.
     try:
         response = input("Create sample video now? (y/n): ").lower().strip()
         if response in ['y', 'yes']:
+            # Use updated renderer (now uses new engine internally)
             success = run_command(
                 "python visualization/render_supercell_3d.py --input data/supercell.zarr --output sample_video.mp4 --duration 15 --fps 30",
                 "Rendering sample video"
             )
+            print("Note: Updated renderer uses new modular engine with shader support")
             if success:
                 video_path = Path("sample_video.mp4")
                 if video_path.exists():
@@ -365,6 +385,11 @@ For detailed documentation, see:
                        help='Animation speed multiplier')
     parser.add_argument('--duration', type=float,
                        help='Video duration in seconds')
+    parser.add_argument('--shader', 
+                       choices=['volume_color', 'volume_grayscale'],
+                       help='Shader to use for rendering (volume_color or volume_grayscale)')
+    parser.add_argument('--scientific', action='store_true',
+                       help='Use scientific-style visualization (grayscale with side-view camera)')
 
     args = parser.parse_args()
 

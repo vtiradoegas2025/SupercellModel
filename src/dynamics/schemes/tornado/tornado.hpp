@@ -17,42 +17,41 @@ public:
 
     // Core momentum tendencies (axisymmetric dynamics)
     void compute_momentum_tendencies(
-
-        const std::vector<std::vector<std::vector<float>>>& u_r,
-        const std::vector<std::vector<std::vector<float>>>& u_theta,
-        const std::vector<std::vector<std::vector<float>>>& u_z,
-        const std::vector<std::vector<std::vector<float>>>& rho,
-        const std::vector<std::vector<std::vector<float>>>& p,
-        const std::vector<std::vector<std::vector<float>>>& theta,
+        const Field3D& u_r,
+        const Field3D& u_theta,
+        const Field3D& u_z,
+        const Field3D& rho,
+        const Field3D& p,
+        const Field3D& theta,
         double dt,
-        std::vector<std::vector<std::vector<float>>>& du_r_dt,
-        std::vector<std::vector<std::vector<float>>>& du_theta_dt,
-        std::vector<std::vector<std::vector<float>>>& du_z_dt,
-        std::vector<std::vector<std::vector<float>>>& drho_dt,
-        std::vector<std::vector<std::vector<float>>>& dp_dt
+        Field3D& du_r_dt,
+        Field3D& du_theta_dt,
+        Field3D& du_z_dt,
+        Field3D& drho_dt,
+        Field3D& dp_dt
     ) override;
 
     // Angular momentum diagnostics (key for tornado spin-up)
     void compute_angular_momentum(
-        const std::vector<std::vector<std::vector<float>>>& u_r,
-        const std::vector<std::vector<std::vector<float>>>& u_theta,
-        std::vector<std::vector<std::vector<float>>>& angular_momentum,
-        std::vector<std::vector<std::vector<float>>>& angular_momentum_tendency
+        const Field3D& u_r,
+        const Field3D& u_theta,
+        Field3D& angular_momentum,
+        Field3D& angular_momentum_tendency
     ) override;
 
     // Axisymmetric vorticity diagnostics
     void compute_vorticity_diagnostics(
-        const std::vector<std::vector<std::vector<float>>>& u_r,
-        const std::vector<std::vector<std::vector<float>>>& u_theta,
-        const std::vector<std::vector<std::vector<float>>>& u_z,
-        const std::vector<std::vector<std::vector<float>>>& rho,
-        const std::vector<std::vector<std::vector<float>>>& p,
-        std::vector<std::vector<std::vector<float>>>& vorticity_r,
-        std::vector<std::vector<std::vector<float>>>& vorticity_theta,
-        std::vector<std::vector<std::vector<float>>>& vorticity_z,
-        std::vector<std::vector<std::vector<float>>>& stretching_term,
-        std::vector<std::vector<std::vector<float>>>& tilting_term,
-        std::vector<std::vector<std::vector<float>>>& baroclinic_term
+        const Field3D& u_r,
+        const Field3D& u_theta,
+        const Field3D& u_z,
+        const Field3D& rho,
+        const Field3D& p,
+        Field3D& vorticity_r,
+        Field3D& vorticity_theta,
+        Field3D& vorticity_z,
+        Field3D& stretching_term,
+        Field3D& tilting_term,
+        Field3D& baroclinic_term
     ) override;
 
     std::string get_scheme_name() const override { return "tornado"; }
@@ -61,12 +60,12 @@ public:
 
 private:
     // Helper functions for axisymmetric calculations
-    double compute_dr(const std::vector<std::vector<std::vector<float>>>& field, int i, int j, int k) const;
-    double compute_dz(const std::vector<std::vector<std::vector<float>>>& field, int i, int j, int k) const;
+    double compute_dr(const Field3D& field, int i, int j, int k) const;
+    double compute_dz(const Field3D& field, int i, int j, int k) const;
 
     // Radial mass flux diagnostic (for vertical motion)
-    double compute_radial_mass_flux(const std::vector<std::vector<std::vector<float>>>& u_r,
-                                   const std::vector<std::vector<std::vector<float>>>& rho,
+    double compute_radial_mass_flux(const Field3D& u_r,
+                                   const Field3D& rho,
                                    int i, int k) const;
 
     // Grid parameters

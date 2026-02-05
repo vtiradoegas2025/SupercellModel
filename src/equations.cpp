@@ -2,8 +2,12 @@
 #include <cmath>
 #include <memory>
 #include "simulation.hpp"
+#include "advection.hpp"
 #include "microphysics/factory.hpp"
 #include "radar/factory.hpp"
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 
 /*This file contains the implementation of the equations.
@@ -40,26 +44,36 @@ void update_grid_resolution()
 }
 
 // Field variables [r][th][z] - will be resized at runtime
-std::vector<std::vector<std::vector<float>>> rho;
-std::vector<std::vector<std::vector<float>>> p;
-std::vector<std::vector<std::vector<float>>> u;
-std::vector<std::vector<std::vector<float>>> w;
-std::vector<std::vector<std::vector<float>>> v_theta;
-std::vector<std::vector<std::vector<float>>> tracer;
+Field3D rho;
+Field3D p;
+Field3D u;
+Field3D w;
+Field3D v_theta;
+Field3D tracer;
 
 // Thermodynamic fields
-std::vector<std::vector<std::vector<float>>> theta;
-std::vector<std::vector<std::vector<float>>> qv;
-std::vector<std::vector<std::vector<float>>> qc;
-std::vector<std::vector<std::vector<float>>> qr;
-std::vector<std::vector<std::vector<float>>> qi;  // cloud ice mixing ratio
-std::vector<std::vector<std::vector<float>>> qs;  // snow mixing ratio
-std::vector<std::vector<std::vector<float>>> qh;
-std::vector<std::vector<std::vector<float>>> qg;
-std::vector<std::vector<std::vector<float>>> tke; // turbulent kinetic energy (MYNN)
+Field3D theta;
+Field3D qv;
+Field3D qc;
+Field3D qr;
+Field3D qi;  // cloud ice mixing ratio
+Field3D qs;  // snow mixing ratio
+Field3D qh;
+Field3D qg;
+Field3D tke; // turbulent kinetic energy (MYNN)
 
 // Radar reflectivity field
-std::vector<std::vector<std::vector<float>>> radar_reflectivity;
+Field3D radar_reflectivity;
+
+// Boundary layer tendency fields
+Field3D dtheta_dt_pbl;
+Field3D dqv_dt_pbl;
+Field3D du_dt_pbl;
+Field3D dv_dt_pbl;
+Field3D dtke_dt_pbl;
+
+// Radiation tendency field
+Field3D dtheta_dt_rad;
 
 // Anelastic base state
 std::vector<double> rho0_base;  // base-state density profile
@@ -70,18 +84,18 @@ std::unique_ptr<RadarSchemeBase> radar_scheme;
 
 // Nested grid configuration and fields
 NestedGridConfig nested_config;
-std::vector<std::vector<std::vector<float>>> nest_rho;
-std::vector<std::vector<std::vector<float>>> nest_p;
-std::vector<std::vector<std::vector<float>>> nest_u;
-std::vector<std::vector<std::vector<float>>> nest_w;
-std::vector<std::vector<std::vector<float>>> nest_v_theta;
-std::vector<std::vector<std::vector<float>>> nest_theta;
-std::vector<std::vector<std::vector<float>>> nest_qv;
-std::vector<std::vector<std::vector<float>>> nest_qc;
-std::vector<std::vector<std::vector<float>>> nest_qr;
-std::vector<std::vector<std::vector<float>>> nest_qh;
-std::vector<std::vector<std::vector<float>>> nest_qg;
-std::vector<std::vector<std::vector<float>>> nest_tracer;
+Field3D nest_rho;
+Field3D nest_p;
+Field3D nest_u;
+Field3D nest_w;
+Field3D nest_v_theta;
+Field3D nest_theta;
+Field3D nest_qv;
+Field3D nest_qc;
+Field3D nest_qr;
+Field3D nest_qh;
+Field3D nest_qg;
+Field3D nest_tracer;
 
 /*This function resizes the fields.
 Takes in the fields and resizes the fields.*/
@@ -89,29 +103,32 @@ void resize_fields()
 {
     update_grid_resolution(); // Update resolution parameters first
 
-    rho.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    p.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    u.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    w.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    v_theta.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    tracer.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    theta.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    qv.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    qc.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    qr.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    qi.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    qs.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    qh.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    qg.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    tke.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    radar_reflectivity.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    rho.resize(NR, NTH, NZ, 0.0f);
+    p.resize(NR, NTH, NZ, 0.0f);
+    u.resize(NR, NTH, NZ, 0.0f);
+    w.resize(NR, NTH, NZ, 0.0f);
+    v_theta.resize(NR, NTH, NZ, 0.0f);
+    tracer.resize(NR, NTH, NZ, 0.0f);
+    theta.resize(NR, NTH, NZ, 0.0f);
+    qv.resize(NR, NTH, NZ, 0.0f);
+    qc.resize(NR, NTH, NZ, 0.0f);
+    qr.resize(NR, NTH, NZ, 0.0f);
+    qi.resize(NR, NTH, NZ, 0.0f);
+    qs.resize(NR, NTH, NZ, 0.0f);
+    qh.resize(NR, NTH, NZ, 0.0f);
+    qg.resize(NR, NTH, NZ, 0.0f);
+    tke.resize(NR, NTH, NZ, 0.0f);
+    radar_reflectivity.resize(NR, NTH, NZ, 0.0f);
 
     // Boundary layer tendency fields
-    dtheta_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqv_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    du_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dv_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dtke_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    dtheta_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+    dqv_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+    du_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+    dv_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+    dtke_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+
+    // Radiation tendency field
+    dtheta_dt_rad.resize(NR, NTH, NZ, 0.0f);
 }
 
     /*This function initializes the base state.
@@ -136,6 +153,7 @@ void initialize()
               << ", rho0_base[" << NZ-1 << "]=" << rho0_base[NZ-1] << std::endl;
 
     // Iterate over the rows, columns, and levels and initialize the base state.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i)
     {
         // double r = i * dr;  // radial distance from center (unused)
@@ -186,6 +204,13 @@ void initialize()
                 double kappa = R_d / cp;  // R/cp
                 double theta_potential = T_actual * pow(p0 / p_local, kappa);
                 theta[i][j][k] = static_cast<float>(theta_potential);
+                
+                // Debug output for first few grid points
+                if (i == 0 && j == 0 && k < 5) {
+                    std::cout << "[INIT DEBUG] i=" << i << ", j=" << j << ", k=" << k 
+                              << ", z=" << z << "m: T_actual=" << T_actual 
+                              << "K, p_local=" << p_local << "Pa, theta=" << theta_potential << "K" << std::endl;
+                }
 
                 // Moisture profile: higher near surface, decreasing with height
                 // Scale base moisture with CAPE target (higher CAPE = more moisture)
@@ -240,6 +265,7 @@ void initialize()
     double bubble_dtheta = 2.0;      // 2K temperature perturbation
 
     // Iterate over the rows, columns, and levels and add the thermal bubble trigger for convection.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i)
     {
         double r_dist = i * dr;
@@ -274,6 +300,46 @@ void initialize()
 
     // Initialize nested grid if enabled
     initialize_nested_grid();
+    
+    // Debug: Check initial theta values
+    float theta_min = 1e10, theta_max = -1e10;
+    float p_min = 1e10, p_max = -1e10;
+    float rho_min = 1e10, rho_max = -1e10;
+    int nan_count = 0, inf_count = 0;
+    
+    for (int i = 0; i < NR; ++i) {
+        for (int j = 0; j < NTH; ++j) {
+            for (int k = 0; k < NZ; ++k) {
+                float theta_val = theta[i][j][k];
+                float p_val = p[i][j][k];
+                float rho_val = rho[i][j][k];
+                
+                if (std::isnan(theta_val) || std::isnan(p_val) || std::isnan(rho_val)) nan_count++;
+                if (std::isinf(theta_val) || std::isinf(p_val) || std::isinf(rho_val)) inf_count++;
+                
+                if (theta_val < theta_min) theta_min = theta_val;
+                if (theta_val > theta_max) theta_max = theta_val;
+                if (p_val < p_min) p_min = p_val;
+                if (p_val > p_max) p_max = p_val;
+                if (rho_val < rho_min) rho_min = rho_val;
+                if (rho_val > rho_max) rho_max = rho_val;
+            }
+        }
+    }
+    
+    std::cout << "\n[INIT SUMMARY] After initialization:" << std::endl;
+    std::cout << "  Theta: min=" << theta_min << "K, max=" << theta_max << "K, expected ~250-350K" << std::endl;
+    std::cout << "  Pressure: min=" << p_min << "Pa, max=" << p_max << "Pa, expected ~50000-100000Pa" << std::endl;
+    std::cout << "  Density: min=" << rho_min << "kg/m³, max=" << rho_max << "kg/m³, expected ~0.5-1.5kg/m³" << std::endl;
+    std::cout << "  NaN count: " << nan_count << ", Inf count: " << inf_count << std::endl;
+    
+    if (theta_min < 0 || theta_max > 500) {
+        std::cerr << "  ⚠️  WARNING: Theta values are outside expected range!" << std::endl;
+    }
+    if (p_min < 20000 || p_max > 120000) {
+        std::cerr << "  ⚠️  WARNING: Pressure values are outside expected range!" << std::endl;
+    }
+    std::cout << std::endl;
 }
 
 /*This function initializes the microphysics scheme.
@@ -319,64 +385,28 @@ void initialize_radar(const std::string& scheme_name)
     }
 }
 
-/*This function advects the scalar field.
-Takes in the scalar field, the timestep, and the diffusion coefficient and advects the scalar field.*/
-void advect_scalar(std::vector<std::vector<std::vector<float>>>& scalar, double dt_advect, double kappa = 0.01)
+/*DEPRECATED: This function has been replaced by the new advection component.
+Kept for backward compatibility but redirects to new stable implementation.
+Use advect_scalar_3d() from advection.hpp instead.*/
+void advect_scalar(Field3D& scalar, double dt_advect, double kappa)
 {
-    std::vector<std::vector<std::vector<float>>> new_scalar = scalar;
-
-    // Iterate over the rows, columns, and levels and advect the scalar field.
-    for (int i = 1; i < NR - 1; ++i)
-    {
-        double r = i * dr + 1e-6;
-
-        // Iterate over the columns and advect the scalar field.
-        for (int j = 0; j < NTH; ++j)
-        {
-            int j_prev = (j - 1 + NTH) % NTH;
-            for (int k = 1; k < NZ - 1; ++k)
-            {
-                double dS_dr = (scalar[i][j][k] - scalar[i - 1][j][k]) / dr;
-                double dS_dz = (scalar[i][j][k] - scalar[i][j][k - 1]) / dz;
-                double dS_dth = (scalar[i][j][k] - scalar[i][j_prev][k]) / dtheta;
-
-                // Laplacian diffusion
-                double lap_S = (scalar[i+1][j][k] - 2*scalar[i][j][k] + scalar[i-1][j][k])/(dr*dr)
-                              + (scalar[i][j][k+1] - 2*scalar[i][j][k] + scalar[i][j][k-1])/(dz*dz)
-                              + (scalar[i][j_prev][k] - 2*scalar[i][j][k] + scalar[i][(j+1)%NTH][k])/(dtheta*dtheta*r*r);
-
-                new_scalar[i][j][k] -= static_cast<float>(dt_advect *
-                (
-                    u[i][j][k] * dS_dr +
-                    (v_theta[i][j][k] / r) * dS_dth +
-                    w[i][j][k] * dS_dz
-                ) - dt_advect * kappa * lap_S);
-            }
-        }
-    }
-
-    scalar = new_scalar;
+    // Redirect to new stable advection component
+    advect_scalar_3d(scalar, dt_advect, kappa);
 }
 
 /*This function advects the tracer field.
 Takes in the timestep and advects the tracer field.*/
 void advect_tracer(double dt_advect)
 {
-    advect_scalar(tracer, dt_advect, 0.01);  // tracer with diffusion
+    advect_tracer_3d(dt_advect, 0.01);  // tracer with diffusion using new component
 }
 
 /*This function advects the thermodynamics.
 Takes in the timestep and advects the thermodynamics.*/
 void advect_thermodynamics(double dt_advect)
 {
-    advect_scalar(theta, dt_advect, 0.0);  // potential temperature (no diffusion)
-    advect_scalar(qv, dt_advect, 0.0);     // water vapor (no diffusion)
-    advect_scalar(qc, dt_advect, 0.0);     // cloud water (no diffusion)
-    advect_scalar(qr, dt_advect, 0.0);     // rain water (no diffusion)
-    advect_scalar(qi, dt_advect, 0.0);     // cloud ice (no diffusion)
-    advect_scalar(qs, dt_advect, 0.0);     // snow (no diffusion)
-    advect_scalar(qh, dt_advect, 0.0);     // hail (no diffusion)
-    advect_scalar(qg, dt_advect, 0.0);     // graupel (no diffusion)
+    // Use new stable advection component with small diffusion for theta
+    advect_thermodynamics_3d(dt_advect, 0.01, 0.01);  // kappa_theta=0.01, kappa_moisture=0.01
 }
 
 /*This function steps the microphysics forward in time.
@@ -391,14 +421,14 @@ void step_microphysics(double dt_micro)
     }
 
     // Temporary arrays for tendencies
-    std::vector<std::vector<std::vector<float>>> dtheta_dt;
-    std::vector<std::vector<std::vector<float>>> dqv_dt;
-    std::vector<std::vector<std::vector<float>>> dqc_dt;
-    std::vector<std::vector<std::vector<float>>> dqr_dt;
-    std::vector<std::vector<std::vector<float>>> dqi_dt;
-    std::vector<std::vector<std::vector<float>>> dqs_dt;
-    std::vector<std::vector<std::vector<float>>> dqg_dt;
-    std::vector<std::vector<std::vector<float>>> dqh_dt;
+    Field3D dtheta_dt(NR, NTH, NZ, 0.0f);
+    Field3D dqv_dt(NR, NTH, NZ, 0.0f);
+    Field3D dqc_dt(NR, NTH, NZ, 0.0f);
+    Field3D dqr_dt(NR, NTH, NZ, 0.0f);
+    Field3D dqi_dt(NR, NTH, NZ, 0.0f);
+    Field3D dqs_dt(NR, NTH, NZ, 0.0f);
+    Field3D dqg_dt(NR, NTH, NZ, 0.0f);
+    Field3D dqh_dt(NR, NTH, NZ, 0.0f);
 
     // Compute microphysics tendencies using the selected scheme
     microphysics_scheme->compute_tendencies(
@@ -408,6 +438,7 @@ void step_microphysics(double dt_micro)
     );
 
     // Iterate over the rows, columns, and levels and apply the microphysics tendencies.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i)
     {
         // Iterate over the columns and apply the microphysics tendencies.
@@ -418,7 +449,19 @@ void step_microphysics(double dt_micro)
             for (int k = 0; k < NZ; ++k)
             {
                 // Apply microphysics + radiation + boundary layer tendencies
-                theta[i][j][k] += (dtheta_dt[i][j][k] + dtheta_dt_rad[i][j][k] + dtheta_dt_pbl[i][j][k]) * dt_micro;
+                float theta_old = theta[i][j][k];
+                float dtheta_total = (dtheta_dt[i][j][k] + dtheta_dt_rad[i][j][k] + dtheta_dt_pbl[i][j][k]) * dt_micro;
+                theta[i][j][k] += dtheta_total;
+                
+                // Debug: Check for extreme changes
+                if (std::abs(dtheta_total) > 100.0f && i == 0 && j == 0 && k < 5) {
+                    std::cerr << "[MICRO DEBUG] Large theta change at i=" << i << ",j=" << j << ",k=" << k 
+                              << ": " << theta_old << " -> " << theta[i][j][k] 
+                              << " (delta=" << dtheta_total << ")" << std::endl;
+                    std::cerr << "  dtheta_dt=" << dtheta_dt[i][j][k] 
+                              << ", dtheta_dt_rad=" << dtheta_dt_rad[i][j][k]
+                              << ", dtheta_dt_pbl=" << dtheta_dt_pbl[i][j][k] << std::endl;
+                }
                 qv[i][j][k] += (dqv_dt[i][j][k] + dqv_dt_pbl[i][j][k]) * dt_micro;
                 qc[i][j][k] += dqc_dt[i][j][k] * dt_micro;
                 qr[i][j][k] += dqr_dt[i][j][k] * dt_micro;
@@ -428,13 +471,20 @@ void step_microphysics(double dt_micro)
                 qh[i][j][k] += dqh_dt[i][j][k] * dt_micro;
 
                 // Ensure non-negative values
-                qv[i][j][k] = std::max(0.0f, qv[i][j][k]);
-                qc[i][j][k] = std::max(0.0f, qc[i][j][k]);
-                qr[i][j][k] = std::max(0.0f, qr[i][j][k]);
-                qi[i][j][k] = std::max(0.0f, qi[i][j][k]);
-                qs[i][j][k] = std::max(0.0f, qs[i][j][k]);
-                qg[i][j][k] = std::max(0.0f, qg[i][j][k]);
-                qh[i][j][k] = std::max(0.0f, qh[i][j][k]);
+                float qv_val = qv[i][j][k];
+                qv[i][j][k] = std::max(0.0f, qv_val);
+                float qc_val = qc[i][j][k];
+                qc[i][j][k] = std::max(0.0f, qc_val);
+                float qr_val = qr[i][j][k];
+                qr[i][j][k] = std::max(0.0f, qr_val);
+                float qi_val = qi[i][j][k];
+                qi[i][j][k] = std::max(0.0f, qi_val);
+                float qs_val = qs[i][j][k];
+                qs[i][j][k] = std::max(0.0f, qs_val);
+                float qg_val = qg[i][j][k];
+                qg[i][j][k] = std::max(0.0f, qg_val);
+                float qh_val = qh[i][j][k];
+                qh[i][j][k] = std::max(0.0f, qh_val);
             }
         }
     }
@@ -454,18 +504,18 @@ void initialize_nested_grid()
     int nz_nest = nested_config.nest_size_z;
 
     // Resize nested grid fields
-    nest_rho.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_p.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_u.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_w.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_v_theta.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_theta.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_qv.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_qc.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_qr.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_qh.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_qg.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
-    nest_tracer.assign(nr_nest, std::vector<std::vector<float>>(nth_nest, std::vector<float>(nz_nest, 0.0f)));
+    nest_rho.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_p.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_u.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_w.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_v_theta.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_theta.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_qv.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_qc.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_qr.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_qh.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_qg.resize(nr_nest, nth_nest, nz_nest, 0.0f);
+    nest_tracer.resize(nr_nest, nth_nest, nz_nest, 0.0f);
 
     // Interpolate from parent grid to initialize nested grid
     // This is a simplified bilinear/trilinear interpolation
@@ -475,6 +525,7 @@ void initialize_nested_grid()
     int ck = nested_config.center_k;
 
     // Iterate over the nested grid and interpolate from the parent grid to initialize the nested grid.
+    #pragma omp parallel for collapse(2)
     for (int i_nest = 0; i_nest < nr_nest; ++i_nest)
     {
         // Iterate over the columns and interpolate from the parent grid to initialize the nested grid.
@@ -498,15 +549,15 @@ void initialize_nested_grid()
                 double fk = k_parent - k0;
 
                 // Interpolate each field
-                auto interpolate = [&](const auto& field, int i0, int j0, int k0, double fi, double fj, double fk) {
-                    double v000 = field[i0][j0][k0];
-                    double v001 = field[i0][j0][k0+1];
-                    double v010 = field[i0][j0+1][k0];
-                    double v011 = field[i0][j0+1][k0+1];
-                    double v100 = field[i0+1][j0][k0];
-                    double v101 = field[i0+1][j0][k0+1];
-                    double v110 = field[i0+1][j0+1][k0];
-                    double v111 = field[i0+1][j0+1][k0+1];
+                auto interpolate = [&](const Field3D& field, int i0, int j0, int k0, double fi, double fj, double fk) {
+                    double v000 = static_cast<float>(field[i0][j0][k0]);
+                    double v001 = static_cast<float>(field[i0][j0][k0+1]);
+                    double v010 = static_cast<float>(field[i0][j0+1][k0]);
+                    double v011 = static_cast<float>(field[i0][j0+1][k0+1]);
+                    double v100 = static_cast<float>(field[i0+1][j0][k0]);
+                    double v101 = static_cast<float>(field[i0+1][j0][k0+1]);
+                    double v110 = static_cast<float>(field[i0+1][j0+1][k0]);
+                    double v111 = static_cast<float>(field[i0+1][j0+1][k0+1]);
 
                     return v000 * (1-fi)*(1-fj)*(1-fk) +
                            v001 * (1-fi)*(1-fj)*fk +
@@ -553,6 +604,7 @@ void feedback_to_parent()
     // (More sophisticated methods would use weighted averaging)
 
     // Iterate over the nested grid and feedback the nested grid to the parent grid.
+    #pragma omp parallel for collapse(2)
     for (int i_nest = 0; i_nest < nr_nest; ++i_nest)
     {
         // Iterate over the columns and feedback the nested grid to the parent grid.
@@ -646,6 +698,7 @@ void calculate_radar_reflectivity()
     // (radar_out.Z_dBZ contains dBZ values, but we need linear for now)
 
     // Iterate over the rows, columns, and levels and copy the radar reflectivity to the global radar_reflectivity field.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over the columns and copy the radar reflectivity to the global radar_reflectivity field.

@@ -1,4 +1,5 @@
 #include "bell.hpp"
+#include "simulation.hpp"
 #include <iostream>
 #include <cmath>
 

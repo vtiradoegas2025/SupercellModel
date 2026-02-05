@@ -54,16 +54,16 @@ void TKEScheme::compute(
     // If the TKE field is not set, initialize the TKE field.
     if (tke_.empty()) 
     {
-        eddy_viscosity::initialize_3d_field(tke_, state.NR, state.NTH, state.NZ, 0.1f); // background TKE
+        tke_.resize(state.NR, state.NTH, state.NZ, 0.1f); // background TKE
     }
 
     // Initialize tendency arrays
-    eddy_viscosity::initialize_3d_field(tend.dudt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dvdt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dwdt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dthetadt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dqvdt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tend.dtkedt_sgs, state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dudt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dvdt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dwdt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dthetadt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dqvdt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    tend.dtkedt_sgs.resize(state.NR, state.NTH, state.NZ, 0.0f);
 
     // Compute eddy coefficients from current TKE
     compute_eddy_coefficients_from_tke(cfg, grid, state);
@@ -98,10 +98,10 @@ void TKEScheme::compute(
         diag_opt->K_tke = K_tke_;
 
         // Compute TKE budget terms for diagnostics
-        std::vector<std::vector<std::vector<float>>> shear_prod, buoy_prod;
-        eddy_viscosity::initialize_3d_field(shear_prod, state.NR, state.NTH, state.NZ, 0.0f);
-        eddy_viscosity::initialize_3d_field(buoy_prod, state.NR, state.NTH, state.NZ, 0.0f);
-        eddy_viscosity::initialize_3d_field(diag_opt->dissipation, state.NR, state.NTH, state.NZ, 0.0f);
+        Field3D shear_prod, buoy_prod;
+        shear_prod.resize(state.NR, state.NTH, state.NZ, 0.0f);
+        buoy_prod.resize(state.NR, state.NTH, state.NZ, 0.0f);
+        diag_opt->dissipation.resize(state.NR, state.NTH, state.NZ, 0.0f);
 
         compute_tke_production(state, grid, nu_t_, shear_prod, buoy_prod);
 
@@ -160,10 +160,10 @@ void TKEScheme::compute_eddy_coefficients_from_tke(
     const TurbulenceStateView& state
 ) {
     // Initialize coefficient arrays
-    eddy_viscosity::initialize_3d_field(nu_t_, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(K_theta_, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(K_q_, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(K_tke_, state.NR, state.NTH, state.NZ, 0.0f);
+    nu_t_.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    K_theta_.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    K_q_.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    K_tke_.resize(state.NR, state.NTH, state.NZ, 0.0f);
 
     // Iterate over the rows, columns, and levels and compute the eddy coefficients from the TKE.
     for (int i = 0; i < state.NR; ++i) 
@@ -214,16 +214,16 @@ void TKEScheme::update_tke_prognostic(
     const TurbulenceConfig& cfg,
     const GridMetrics& grid,
     const TurbulenceStateView& state,
-    std::vector<std::vector<std::vector<float>>>& dtke_dt
+    Field3D& dtke_dt
 ) 
 {
     // Initialize TKE tendency
-    eddy_viscosity::initialize_3d_field(dtke_dt, state.NR, state.NTH, state.NZ, 0.0f);
+    dtke_dt.resize(state.NR, state.NTH, state.NZ, 0.0f);
 
     // Compute TKE production terms
-    std::vector<std::vector<std::vector<float>>> shear_prod, buoy_prod;
-    eddy_viscosity::initialize_3d_field(shear_prod, state.NR, state.NTH, state.NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(buoy_prod, state.NR, state.NTH, state.NZ, 0.0f);
+    Field3D shear_prod, buoy_prod;
+    shear_prod.resize(state.NR, state.NTH, state.NZ, 0.0f);
+    buoy_prod.resize(state.NR, state.NTH, state.NZ, 0.0f);
 
     compute_tke_production(state, grid, nu_t_, shear_prod, buoy_prod);
 
@@ -267,9 +267,9 @@ Takes in the state, grid, the eddy viscosity, and the shear and buoyancy product
 void TKEScheme::compute_tke_production(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
-    const std::vector<std::vector<std::vector<float>>>& nu_t,
-    std::vector<std::vector<std::vector<float>>>& shear_prod,
-    std::vector<std::vector<std::vector<float>>>& buoy_prod
+    const Field3D& nu_t,
+    Field3D& shear_prod,
+    Field3D& buoy_prod
 ) 
 {
     // Iterate over the rows, columns, and levels and compute the TKE production.

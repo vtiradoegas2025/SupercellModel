@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <functional>
+#include "field3d.hpp"
 
 /**
  * @file chaos_base.hpp
@@ -105,13 +106,13 @@ struct ChaosStateView
     const GridMetrics* grid = nullptr;
 
     // State fields (read-only references)
-    const std::vector<std::vector<std::vector<float>>>* u = nullptr;     // radial wind
-    const std::vector<std::vector<std::vector<float>>>* v_theta = nullptr; // azimuthal wind
-    const std::vector<std::vector<std::vector<float>>>* w = nullptr;     // vertical wind
-    const std::vector<std::vector<std::vector<float>>>* theta = nullptr; // potential temperature
-    const std::vector<std::vector<std::vector<float>>>* qv = nullptr;    // water vapor
-    const std::vector<std::vector<std::vector<float>>>* qc = nullptr;    // cloud water
-    const std::vector<std::vector<std::vector<float>>>* qr = nullptr;    // rain water
+    const Field3D* u = nullptr;     // radial wind
+    const Field3D* v_theta = nullptr; // azimuthal wind
+    const Field3D* w = nullptr;     // vertical wind
+    const Field3D* theta = nullptr; // potential temperature
+    const Field3D* qv = nullptr;    // water vapor
+    const Field3D* qc = nullptr;    // cloud water
+    const Field3D* qr = nullptr;    // rain water
 
     // Diagnostic helpers
     double pbl_height = 1000.0;  // Planetary boundary layer height (m)

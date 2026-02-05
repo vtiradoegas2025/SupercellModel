@@ -58,7 +58,7 @@ private:
      * @param q_rain Rain mixing ratio field
      * @param out Radar output structure to update
      */
-    void compute_polarimetric_rain(const std::vector<std::vector<std::vector<float>>>& q_rain, RadarOut& out);
+    void compute_polarimetric_rain(const Field3D& q_rain, RadarOut& out);
 
     /**
      * @brief Compute polarimetric reflectivities for ice species (simplified)
@@ -67,7 +67,7 @@ private:
      * @param species Species name ("snow", "graupel", "hail", "ice")
      * @param out Radar output structure to update
      */
-    void compute_polarimetric_ice(const std::vector<std::vector<std::vector<float>>>& q_ice,
+    void compute_polarimetric_ice(const Field3D& q_ice,
                                   const std::string& species, RadarOut& out);
 
     /**

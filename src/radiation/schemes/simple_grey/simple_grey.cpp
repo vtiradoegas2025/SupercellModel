@@ -203,7 +203,6 @@ void SimpleGreyScheme::compute_sw_heating(
         Fnet_sw[k] = Fup_sw[k] - Fdn_sw[k];
     }
 
-    /
     /*This function computes the heating rate from the flux divergence.
     Takes in the density, the vertical grid spacing, the net flux, and the heating rate and computes the heating rate from the flux divergence.*/
     radiative_transfer::heating_rate_from_flux_divergence(

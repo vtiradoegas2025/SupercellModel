@@ -2,27 +2,98 @@
 """
 Offline 3D volume renderer for supercell simulations.
 Renders high-quality videos from Zarr datasets using OpenGL volume ray marching.
+
+This script uses the new modular engine internally while maintaining backward compatibility.
+All existing CLI interface and behavior remain unchanged.
 """
 import argparse
 import os
 import subprocess
+import shutil
 import tempfile
 from pathlib import Path
 import numpy as np
 from PIL import Image
-import moderngl as mgl
-import zarr
-from supercell_renderer import SupercellVolumeRenderer
+
+# Conditional imports for OpenGL dependencies
+try:
+    import moderngl as mgl
+    import zarr
+    from tqdm import tqdm
+    OPENGL_AVAILABLE = True
+except ImportError as e:
+    OPENGL_AVAILABLE = False
+    missing_module = str(e).split("'")[1] if "'" in str(e) else "unknown"
+    # Create dummy classes
+    class mgl:
+        pass
+    class zarr:
+        pass
+    class tqdm:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+# Import new engine components
+ENGINE_AVAILABLE = False
+try:
+    # Try relative import first (when used as module)
+    try:
+        from .renderers.offline_renderer import OfflineRenderer as NewOfflineRenderer
+        ENGINE_AVAILABLE = True
+    except (ImportError, ModuleNotFoundError):
+        # Fallback to absolute import (when run as script)
+        try:
+            import sys
+            from pathlib import Path
+            vis_path = Path(__file__).parent
+            if str(vis_path) not in sys.path:
+                sys.path.insert(0, str(vis_path))
+            from renderers.offline_renderer import OfflineRenderer as NewOfflineRenderer
+            ENGINE_AVAILABLE = True
+        except (ImportError, ModuleNotFoundError):
+            # Engine components not available
+            ENGINE_AVAILABLE = False
+except Exception:
+    ENGINE_AVAILABLE = False
 
 class OfflineVolumeRenderer:
     """
     Renders 3D volume animations to video files without display window.
+    
+    Uses new modular engine internally while maintaining same interface.
     """
     def __init__(self, zarr_path: str, width: int = 1920, height: int = 1080):
         self.zarr_path = Path(zarr_path)
         self.width = width
         self.height = height
 
+        # Use new OfflineRenderer if available
+        if ENGINE_AVAILABLE:
+            try:
+                self._new_renderer = NewOfflineRenderer(
+                    str(zarr_path),
+                    primary_field="theta",
+                    shader="volume_color",
+                    width=width,
+                    height=height
+                )
+                # Map old interface to new renderer
+                self.ctx = self._new_renderer.engine.ctx
+                self.fbo = self._new_renderer.engine.fbo
+                self.nt = self._new_renderer.num_timesteps
+                print("Using new modular engine for rendering")
+                return
+            except Exception as e:
+                print(f"Warning: New engine failed, using fallback: {e}")
+                self._new_renderer = None
+        
+        # Fallback to original implementation
+        self._new_renderer = None
+        
         # Create headless OpenGL context
         self.ctx = mgl.create_standalone_context()
         self.ctx.enable(mgl.DEPTH_TEST)
@@ -43,8 +114,28 @@ class OfflineVolumeRenderer:
 
     def load_data(self):
         """Load Zarr data"""
+        if not self.zarr_path.exists():
+            raise FileNotFoundError(f"Zarr file not found: {self.zarr_path}")
+        
         self.store = zarr.open(str(self.zarr_path), mode='r')
-        self.nt, self.nz, self.ny, self.nx = self.store['theta'].shape
+        
+        # Validate that required field exists
+        if 'theta' not in self.store:
+            available_fields = list(self.store.keys())
+            raise ValueError(f"Required field 'theta' not found in Zarr file. Available fields: {available_fields}")
+        
+        # Validate data dimensions
+        theta_shape = self.store['theta'].shape
+        if len(theta_shape) != 4:
+            raise ValueError(f"Expected 4D array (time, z, y, x), got shape {theta_shape}")
+        
+        self.nt, self.nz, self.ny, self.nx = theta_shape
+        
+        if self.nt == 0:
+            raise ValueError("No timesteps found in data")
+        if self.nx == 0 or self.ny == 0 or self.nz == 0:
+            raise ValueError(f"Invalid grid dimensions: {self.nx}x{self.ny}x{self.nz}")
+        
         self.primary_data = self.store['theta'][:]
 
         # Load secondary fields - expanded to include all atmospheric fields
@@ -70,10 +161,17 @@ class OfflineVolumeRenderer:
         )
         self.volume_texture.filter = (mgl.LINEAR, mgl.LINEAR)
 
-        # Load shaders
+        # Load shaders - try new location first, then fallback
         shader_dir = Path(__file__).parent / "shaders"
-        vertex_shader = (shader_dir / "volume.vert").read_text()
-        fragment_shader = (shader_dir / "volume.frag").read_text()
+        vert_path = shader_dir / "volume" / "volume.vert"
+        frag_path = shader_dir / "volume" / "volume_color.frag"
+        if not vert_path.exists():
+            vert_path = shader_dir / "volume.vert"
+        if not frag_path.exists():
+            frag_path = shader_dir / "volume.frag"
+        
+        vertex_shader = vert_path.read_text()
+        fragment_shader = frag_path.read_text()
 
         # Create shader program
         self.volume_prog = self.ctx.program(
@@ -292,7 +390,21 @@ class OfflineVolumeRenderer:
     def render_animation(self, output_path: str, fps: int = 30, duration: float = None,
                         speed: float = 1.0):
         """Render full animation to video"""
-
+        # Use new renderer if available
+        if self._new_renderer is not None:
+            try:
+                self._new_renderer.render_animation(
+                    output_path,
+                    fps=fps,
+                    duration=duration,
+                    speed=speed,
+                    camera_rotation=True
+                )
+                return
+            except Exception as e:
+                print(f"Warning: New renderer failed, using fallback: {e}")
+        
+        # Fallback to original implementation
         if duration is None:
             # Render entire simulation
             frame_count = self.nt
@@ -305,8 +417,8 @@ class OfflineVolumeRenderer:
 
             print(f"Rendering {frame_count} frames...")
 
-            # Render each frame
-            for frame_idx in range(frame_count):
+            # Render each frame with progress bar
+            for frame_idx in tqdm(range(frame_count), desc="Rendering frames", unit="frame"):
                 timestep = int(frame_idx * speed) % self.nt
                 camera_angle = frame_idx * 0.02  # Slow camera rotation
 
@@ -315,13 +427,19 @@ class OfflineVolumeRenderer:
 
                 # Save as PNG
                 img = Image.fromarray(pixels, 'RGBA')
-                frame_path = temp_path / "06d"
+                frame_path = temp_path / f"frame_{frame_idx:06d}.png"
                 img.save(frame_path)
 
-                if frame_idx % 50 == 0:
-                    print(".1f")
-
             print("Encoding video...")
+
+            # Check if FFmpeg is available
+            ffmpeg_path = shutil.which("ffmpeg")
+            if ffmpeg_path is None:
+                raise RuntimeError(
+                    "FFmpeg is not installed or not in PATH. "
+                    "Please install FFmpeg to encode videos.\n"
+                    "Installation: https://ffmpeg.org/download.html"
+                )
 
             # Encode to video with ffmpeg
             cmd = [
@@ -354,6 +472,15 @@ def main():
     parser.add_argument("--height", type=int, default=1080, help="Video height")
 
     args = parser.parse_args()
+
+    # Check dependencies after parsing (allows --help to work)
+    if not OPENGL_AVAILABLE:
+        print("ERROR: OpenGL dependencies not installed!")
+        print("Required packages: moderngl, zarr, tqdm")
+        print("Install with: pip install moderngl zarr tqdm")
+        print("\nFor a simple 2D animation without OpenGL, use:")
+        print("  python visualization/create_animation.py --input <data_path> --field theta --output animation.gif")
+        return 1
 
     # Create renderer
     renderer = OfflineVolumeRenderer(args.input, args.width, args.height)

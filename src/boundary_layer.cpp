@@ -11,12 +11,7 @@ std::unique_ptr<BoundaryLayerSchemeBase> boundary_layer_scheme = nullptr;
 BoundaryLayerConfig global_boundary_layer_config;
 SurfaceConfig global_surface_config;
 
-// Boundary layer tendency fields
-std::vector<std::vector<std::vector<float>>> dtheta_dt_pbl;  // potential temperature tendency
-std::vector<std::vector<std::vector<float>>> dqv_dt_pbl;     // moisture tendency
-std::vector<std::vector<std::vector<float>>> du_dt_pbl;      // u-wind tendency
-std::vector<std::vector<std::vector<float>>> dv_dt_pbl;      // v-wind tendency
-std::vector<std::vector<std::vector<float>>> dtke_dt_pbl;    // TKE tendency (MYNN only)
+// Boundary layer tendency fields (declared in simulation.hpp as extern Field3D)
 
 /*This function initializes the boundary layer scheme.
 Takes in the scheme name, configuration, and surface configuration and initializes the boundary layer scheme.*/
@@ -31,11 +26,11 @@ void initialize_boundary_layer(const std::string& scheme_name,
         boundary_layer_scheme->initialize(global_boundary_layer_config);
 
         // Resize boundary layer tendency fields
-        dtheta_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        dqv_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        du_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        dv_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        dtke_dt_pbl.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+        dtheta_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+        dqv_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+        du_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+        dv_dt_pbl.resize(NR, NTH, NZ, 0.0f);
+        dtke_dt_pbl.resize(NR, NTH, NZ, 0.0f);
 
         std::cout << "Initialized boundary layer scheme: " << scheme_name << std::endl;
         std::cout << "  PBL cadence: " << global_boundary_layer_config.dt_pbl << " s" << std::endl;

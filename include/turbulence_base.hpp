@@ -2,6 +2,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include "field3d.hpp"
 
 // Turbulence module constants
 namespace turbulence_constants {
@@ -48,15 +49,15 @@ enum class TurbulenceRequirements {
 // Single column/3D state for turbulence computation
 struct TurbulenceStateView {
     // Required basic state
-    const std::vector<std::vector<std::vector<float>>>* u = nullptr;    // zonal wind [m/s]
-    const std::vector<std::vector<std::vector<float>>>* v = nullptr;    // meridional wind [m/s]
-    const std::vector<std::vector<std::vector<float>>>* w = nullptr;    // vertical wind [m/s]
-    const std::vector<std::vector<std::vector<float>>>* rho = nullptr;  // density [kg/m³]
-    const std::vector<std::vector<std::vector<float>>>* theta = nullptr; // potential temperature [K]
+    const Field3D* u = nullptr;    // zonal wind [m/s]
+    const Field3D* v = nullptr;    // meridional wind [m/s]
+    const Field3D* w = nullptr;    // vertical wind [m/s]
+    const Field3D* rho = nullptr;  // density [kg/m³]
+    const Field3D* theta = nullptr; // potential temperature [K]
 
     // Optional for advanced schemes
-    const std::vector<std::vector<std::vector<float>>>* qv = nullptr;   // water vapor mixing ratio [kg/kg]
-    const std::vector<std::vector<std::vector<float>>>* tke = nullptr;  // TKE [m²/s²]
+    const Field3D* qv = nullptr;   // water vapor mixing ratio [kg/kg]
+    const Field3D* tke = nullptr;  // TKE [m²/s²]
 
     // Grid information
     int NR = 0, NTH = 0, NZ = 0;  // grid dimensions
@@ -64,29 +65,29 @@ struct TurbulenceStateView {
 
 // Output tendencies and diagnostics
 struct TurbulenceTendencies {
-    std::vector<std::vector<std::vector<float>>> dudt_sgs;      // u-momentum tendency [m/s²]
-    std::vector<std::vector<std::vector<float>>> dvdt_sgs;      // v-momentum tendency [m/s²]
-    std::vector<std::vector<std::vector<float>>> dwdt_sgs;      // w-momentum tendency [m/s²]
-    std::vector<std::vector<std::vector<float>>> dthetadt_sgs;  // temperature tendency [K/s]
-    std::vector<std::vector<std::vector<float>>> dqvdt_sgs;     // moisture tendency [kg/kg/s] (optional)
-    std::vector<std::vector<std::vector<float>>> dtkedt_sgs;    // TKE tendency [m²/s³] (TKE scheme)
+    Field3D dudt_sgs;      // u-momentum tendency [m/s²]
+    Field3D dvdt_sgs;      // v-momentum tendency [m/s²]
+    Field3D dwdt_sgs;      // w-momentum tendency [m/s²]
+    Field3D dthetadt_sgs;  // temperature tendency [K/s]
+    Field3D dqvdt_sgs;     // moisture tendency [kg/kg/s] (optional)
+    Field3D dtkedt_sgs;    // TKE tendency [m²/s³] (TKE scheme)
 };
 
 struct TurbulenceDiagnostics {
     // Eddy coefficients (can be 3D or interface-based)
-    std::vector<std::vector<std::vector<float>>> nu_t;      // eddy viscosity [m²/s]
-    std::vector<std::vector<std::vector<float>>> K_theta;   // temperature diffusivity [m²/s]
-    std::vector<std::vector<std::vector<float>>> K_q;       // moisture diffusivity [m²/s]
-    std::vector<std::vector<std::vector<float>>> K_tke;     // TKE diffusivity [m²/s] (TKE scheme)
+    Field3D nu_t;      // eddy viscosity [m²/s]
+    Field3D K_theta;   // temperature diffusivity [m²/s]
+    Field3D K_q;       // moisture diffusivity [m²/s]
+    Field3D K_tke;     // TKE diffusivity [m²/s] (TKE scheme)
 
     // TKE budget terms (TKE scheme diagnostics)
-    std::vector<std::vector<std::vector<float>>> shear_prod;    // shear production [m²/s³]
-    std::vector<std::vector<std::vector<float>>> buoy_prod;     // buoyancy production [m²/s³]
-    std::vector<std::vector<std::vector<float>>> dissipation;   // dissipation [m²/s³]
+    Field3D shear_prod;    // shear production [m²/s³]
+    Field3D buoy_prod;     // buoyancy production [m²/s³]
+    Field3D dissipation;   // dissipation [m²/s³]
 
     // Dynamic coefficients (future extension)
-    std::vector<std::vector<std::vector<float>>> Cs_eff;    // effective Smagorinsky coefficient
-    std::vector<std::vector<std::vector<float>>> Pr_t_eff;  // effective Prandtl number
+    Field3D Cs_eff;    // effective Smagorinsky coefficient
+    Field3D Pr_t_eff;  // effective Prandtl number
 };
 
 // Abstract base class for turbulence schemes

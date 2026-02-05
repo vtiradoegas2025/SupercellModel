@@ -15,19 +15,19 @@
 Takes in the theta field, the pressure field, and the temperature field
 and converts the potential temperature field to the temperature field.*/
 void thermodynamics::convert_theta_to_temperature_field(
-    const std::vector<std::vector<std::vector<float>>>& theta,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    std::vector<std::vector<std::vector<float>>>& temperature
+    const Field3D& theta,
+    const Field3D& p,
+    Field3D& temperature
 ) 
 {
     // Get the number of rows, columns, and levels.
-    int NR = theta.size();
+    int NR = theta.size_r();
     if (NR == 0) return;
-    int NTH = theta[0].size();
+    int NTH = theta.size_th();
     if (NTH == 0) return;
-    int NZ = theta[0][0].size();
+    int NZ = theta.size_z();
 
-    temperature.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    temperature.resize(NR, NTH, NZ, 0.0f);
 
     // Iterate over all rows.
     for (int i = 0; i < NR; ++i) 
@@ -39,7 +39,7 @@ void thermodynamics::convert_theta_to_temperature_field(
             for (int k = 0; k < NZ; ++k) 
             {
                 temperature[i][j][k] = static_cast<float>(
-                    theta_to_temperature(theta[i][j][k], p[i][j][k])
+                    theta_to_temperature(static_cast<double>(theta[i][j][k]), static_cast<double>(p[i][j][k]))
                 );
             }
         }
@@ -50,19 +50,19 @@ void thermodynamics::convert_theta_to_temperature_field(
 Takes in the temperature field, the pressure field, and the potential temperature field
 and converts the temperature field to the potential temperature field.*/
 void thermodynamics::convert_temperature_to_theta_field(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    std::vector<std::vector<std::vector<float>>>& theta
+    const Field3D& temperature,
+    const Field3D& p,
+    Field3D& theta
 ) 
 {
     // Get the number of rows, columns, and levels.
-    int NR = temperature.size();
+    int NR = temperature.size_r();
     if (NR == 0) return;
-    int NTH = temperature[0].size();
+    int NTH = temperature.size_th();
     if (NTH == 0) return;
-    int NZ = temperature[0][0].size();
+    int NZ = temperature.size_z();
 
-    theta.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    theta.resize(NR, NTH, NZ, 0.0f);
 
     // Iterate over all radial points
     for (int i = 0; i < NR; ++i) 
@@ -74,7 +74,7 @@ void thermodynamics::convert_temperature_to_theta_field(
             for (int k = 0; k < NZ; ++k) 
             {
                 theta[i][j][k] = static_cast<float>(
-                    temperature_to_theta(temperature[i][j][k], p[i][j][k])
+                    temperature_to_theta(static_cast<double>(temperature[i][j][k]), static_cast<double>(p[i][j][k]))
                 );
             }
         }

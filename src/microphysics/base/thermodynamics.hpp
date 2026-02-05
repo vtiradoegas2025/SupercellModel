@@ -2,6 +2,7 @@
 #include <vector>
 #include <cmath>
 #include "../../../include/microphysics_base.hpp"
+#include "../../../include/field3d.hpp"
 
 /*This namespace contains the thermodynamics utilities for the microphysics schemes.
 This namespace contains the theta_to_temperature, temperature_to_theta, 
@@ -171,18 +172,18 @@ inline double saturation_adjustment(double T_in, double p, double& qv, double& q
 Takes in the potential temperature field, the pressure field, and the temperature field
 and converts the potential temperature field to the temperature field.*/
 void convert_theta_to_temperature_field(
-    const std::vector<std::vector<std::vector<float>>>& theta,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    std::vector<std::vector<std::vector<float>>>& temperature
+    const Field3D& theta,
+    const Field3D& p,
+    Field3D& temperature
 );
 
 /*This function converts the temperature field to the potential temperature field.
 Takes in the temperature field, the pressure field, and the potential temperature field
 and converts the temperature field to the potential temperature field.*/
 void convert_temperature_to_theta_field(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    std::vector<std::vector<std::vector<float>>>& theta
+    const Field3D& temperature,
+    const Field3D& p,
+    Field3D& theta
 );
 
 } // namespace thermodynamics

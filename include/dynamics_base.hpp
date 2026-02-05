@@ -2,6 +2,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include "field3d.hpp"
 
 /*This header file contains the base classes and structures for the dynamics module.
 The dynamics module is responsible for the dynamics of the simulation.
@@ -18,55 +19,55 @@ public:
     // Core interface - compute tendencies for momentum equations
     virtual void compute_momentum_tendencies(
         // Input state (cylindrical coordinates: r, θ, z)
-        const std::vector<std::vector<std::vector<float>>>& u_r,        // radial wind [r][θ][z]
-        const std::vector<std::vector<std::vector<float>>>& u_theta,    // azimuthal wind [r][θ][z]
-        const std::vector<std::vector<std::vector<float>>>& u_z,        // vertical wind [r][θ][z]
-        const std::vector<std::vector<std::vector<float>>>& rho,        // density [r][θ][z]
-        const std::vector<std::vector<std::vector<float>>>& p,          // pressure [r][θ][z]
-        const std::vector<std::vector<std::vector<float>>>& theta,      // potential temperature [r][θ][z]
+        const Field3D& u_r,        // radial wind [r][θ][z]
+        const Field3D& u_theta,    // azimuthal wind [r][θ][z]
+        const Field3D& u_z,        // vertical wind [r][θ][z]
+        const Field3D& rho,        // density [r][θ][z]
+        const Field3D& p,          // pressure [r][θ][z]
+        const Field3D& theta,      // potential temperature [r][θ][z]
         double dt,                                                      // timestep
         // Output tendencies (will be added to existing fields)
-        std::vector<std::vector<std::vector<float>>>& du_r_dt,          // radial momentum tendency
-        std::vector<std::vector<std::vector<float>>>& du_theta_dt,      // azimuthal momentum tendency
-        std::vector<std::vector<std::vector<float>>>& du_z_dt,          // vertical momentum tendency
-        std::vector<std::vector<std::vector<float>>>& drho_dt,          // density tendency
-        std::vector<std::vector<std::vector<float>>>& dp_dt             // pressure tendency
+        Field3D& du_r_dt,          // radial momentum tendency
+        Field3D& du_theta_dt,      // azimuthal momentum tendency
+        Field3D& du_z_dt,          // vertical momentum tendency
+        Field3D& drho_dt,          // density tendency
+        Field3D& dp_dt             // pressure tendency
     ) = 0;
 
     // Vorticity diagnostics (key for supercell/tornado development)
     virtual void compute_vorticity_diagnostics(
-        const std::vector<std::vector<std::vector<float>>>& u_r,
-        const std::vector<std::vector<std::vector<float>>>& u_theta,
-        const std::vector<std::vector<std::vector<float>>>& u_z,
-        const std::vector<std::vector<std::vector<float>>>& rho,
-        const std::vector<std::vector<std::vector<float>>>& p,
+        const Field3D& u_r,
+        const Field3D& u_theta,
+        const Field3D& u_z,
+        const Field3D& rho,
+        const Field3D& p,
         // Output vorticity components and tendencies
-        std::vector<std::vector<std::vector<float>>>& vorticity_r,      // radial vorticity
-        std::vector<std::vector<std::vector<float>>>& vorticity_theta,  // azimuthal vorticity
-        std::vector<std::vector<std::vector<float>>>& vorticity_z,      // vertical vorticity (ζ)
-        std::vector<std::vector<std::vector<float>>>& stretching_term,  // ζ * ∂w/∂z
-        std::vector<std::vector<std::vector<float>>>& tilting_term,     // tilting of horizontal vorticity
-        std::vector<std::vector<std::vector<float>>>& baroclinic_term   // baroclinic generation
+        Field3D& vorticity_r,      // radial vorticity
+        Field3D& vorticity_theta,  // azimuthal vorticity
+        Field3D& vorticity_z,      // vertical vorticity (ζ)
+        Field3D& stretching_term,  // ζ * ∂w/∂z
+        Field3D& tilting_term,     // tilting of horizontal vorticity
+        Field3D& baroclinic_term   // baroclinic generation
     ) {}
 
     // Angular momentum diagnostics (for tornado dynamics)
     virtual void compute_angular_momentum(
-        const std::vector<std::vector<std::vector<float>>>& u_r,
-        const std::vector<std::vector<std::vector<float>>>& u_theta,
-        std::vector<std::vector<std::vector<float>>>& angular_momentum,  // M = r * V
-        std::vector<std::vector<std::vector<float>>>& angular_momentum_tendency
+        const Field3D& u_r,
+        const Field3D& u_theta,
+        Field3D& angular_momentum,  // M = r * V
+        Field3D& angular_momentum_tendency
     ) {}
 
     // Pressure diagnostics (perturbation pressure solver for supercells)
     virtual void compute_pressure_diagnostics(
-        const std::vector<std::vector<std::vector<float>>>& u_r,
-        const std::vector<std::vector<std::vector<float>>>& u_theta,
-        const std::vector<std::vector<std::vector<float>>>& u_z,
-        const std::vector<std::vector<std::vector<float>>>& rho,
-        const std::vector<std::vector<std::vector<float>>>& theta,
-        std::vector<std::vector<std::vector<float>>>& p_prime,          // perturbation pressure
-        std::vector<std::vector<std::vector<float>>>& dynamic_pressure,  // deformation/rotation component
-        std::vector<std::vector<std::vector<float>>>& buoyancy_pressure  // buoyancy component
+        const Field3D& u_r,
+        const Field3D& u_theta,
+        const Field3D& u_z,
+        const Field3D& rho,
+        const Field3D& theta,
+        Field3D& p_prime,          // perturbation pressure
+        Field3D& dynamic_pressure,  // deformation/rotation component
+        Field3D& buoyancy_pressure  // buoyancy component
     ) {}
 
     // Get scheme name for diagnostics

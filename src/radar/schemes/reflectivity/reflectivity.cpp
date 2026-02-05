@@ -245,10 +245,10 @@ void ReflectivityScheme::compute_psd_moment(const RadarConfig& config, const Rad
 Takes in the q, the number concentrations, the properties, 
 and the output and computes the species reflectivity.*/
 void ReflectivityScheme::compute_species_reflectivity(
-    const std::vector<std::vector<std::vector<float>>>& q,
-    const std::vector<std::vector<std::vector<float>>>* Nt,
+    const Field3D& q,
+    const Field3D* Nt,
     const HydrometeorProps& props,
-    std::vector<std::vector<std::vector<float>>>& Ze_out) {
+    Field3D& Ze_out) {
 
     // If we have number concentrations, use moment-based calculation
     if (Nt) 
@@ -303,10 +303,10 @@ void ReflectivityScheme::compute_species_reflectivity(
 Takes in the q, the number concentrations, the properties, 
 and the output and computes the moment reflectivity.*/
 void ReflectivityScheme::compute_moment_reflectivity(
-    const std::vector<std::vector<std::vector<float>>>& q,
-    const std::vector<std::vector<std::vector<float>>>* Nt,
+    const Field3D& q,
+    const Field3D* Nt,
     const HydrometeorProps& props,
-    std::vector<std::vector<std::vector<float>>>& Ze_out,
+    Field3D& Ze_out,
     const std::string& species_name) {
 
     // If the number concentrations are not available, compute the species reflectivity.

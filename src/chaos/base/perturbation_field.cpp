@@ -261,8 +261,6 @@ void apply_physical_bounds(
     }
 }
 
-
-/
 /*This function evolves the perturbation field for the 3D field.
 Takes in the perturbation field, the previous perturbation field, the temporal correlation,
 the random number generator, the stream key, and the time step

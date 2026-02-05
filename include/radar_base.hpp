@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include "field3d.hpp"
 #include "simulation.hpp"  // For grid dimensions
 
 /**
@@ -75,27 +76,27 @@ struct RadarStateView
     int NR, NTH, NZ;
 
     // Winds (required for velocity)
-    const std::vector<std::vector<std::vector<float>>>* u = nullptr;
-    const std::vector<std::vector<std::vector<float>>>* v = nullptr;
-    const std::vector<std::vector<std::vector<float>>>* w = nullptr;
+    const Field3D* u = nullptr;
+    const Field3D* v = nullptr;
+    const Field3D* w = nullptr;
 
     // Hydrometeor mixing ratios (required for reflectivity/ZDR)
-    const std::vector<std::vector<std::vector<float>>>* qr = nullptr;  // rain
-    const std::vector<std::vector<std::vector<float>>>* qs = nullptr;  // snow
-    const std::vector<std::vector<std::vector<float>>>* qg = nullptr;  // graupel
-    const std::vector<std::vector<std::vector<float>>>* qh = nullptr;  // hail
-    const std::vector<std::vector<std::vector<float>>>* qi = nullptr;  // ice
+    const Field3D* qr = nullptr;  // rain
+    const Field3D* qs = nullptr;  // snow
+    const Field3D* qg = nullptr;  // graupel
+    const Field3D* qh = nullptr;  // hail
+    const Field3D* qi = nullptr;  // ice
 
     // Optional number concentrations (for double-moment schemes)
-    const std::vector<std::vector<std::vector<float>>>* Nr = nullptr;  // rain
-    const std::vector<std::vector<std::vector<float>>>* Ns = nullptr;  // snow
-    const std::vector<std::vector<std::vector<float>>>* Ng = nullptr;  // graupel
-    const std::vector<std::vector<std::vector<float>>>* Nh = nullptr;  // hail
-    const std::vector<std::vector<std::vector<float>>>* Ni = nullptr;  // ice
+    const Field3D* Nr = nullptr;  // rain
+    const Field3D* Ns = nullptr;  // snow
+    const Field3D* Ng = nullptr;  // graupel
+    const Field3D* Nh = nullptr;  // hail
+    const Field3D* Ni = nullptr;  // ice
 
     // Optional thermodynamics (for temperature-dependent assumptions)
-    const std::vector<std::vector<std::vector<float>>>* theta = nullptr;  // potential temperature
-    const std::vector<std::vector<std::vector<float>>>* p = nullptr;      // pressure
+    const Field3D* theta = nullptr;  // potential temperature
+    const Field3D* p = nullptr;      // pressure
 };
 
 /**
@@ -107,21 +108,21 @@ struct RadarOut
     int NR, NTH, NZ;
 
     // Primary radar observables
-    std::vector<std::vector<std::vector<float>>> Z_dBZ;      // Reflectivity (dBZ)
-    std::vector<std::vector<std::vector<float>>> Vr;         // Radial velocity (m/s)
-    std::vector<std::vector<std::vector<float>>> ZDR_dB;     // Differential reflectivity (dB)
+    Field3D Z_dBZ;      // Reflectivity (dBZ)
+    Field3D Vr;         // Radial velocity (m/s)
+    Field3D ZDR_dB;     // Differential reflectivity (dB)
 
     // Debug/internal fields (optional but recommended)
-    std::vector<std::vector<std::vector<float>>> Ze_linear;  // Linear reflectivity (mm^6/m^3)
-    std::vector<std::vector<std::vector<float>>> ZH_dBZ;      // Horizontal reflectivity (dBZ)
-    std::vector<std::vector<std::vector<float>>> ZV_dBZ;      // Vertical reflectivity (dBZ)
+    Field3D Ze_linear;  // Linear reflectivity (mm^6/m^3)
+    Field3D ZH_dBZ;      // Horizontal reflectivity (dBZ)
+    Field3D ZV_dBZ;      // Vertical reflectivity (dBZ)
 
     // Species contributions (for reflectivity debugging)
-    std::vector<std::vector<std::vector<float>>> Ze_rain;     // Rain contribution
-    std::vector<std::vector<std::vector<float>>> Ze_snow;     // Snow contribution
-    std::vector<std::vector<std::vector<float>>> Ze_graupel;  // Graupel contribution
-    std::vector<std::vector<std::vector<float>>> Ze_hail;     // Hail contribution
-    std::vector<std::vector<std::vector<float>>> Ze_ice;      // Ice contribution
+    Field3D Ze_rain;     // Rain contribution
+    Field3D Ze_snow;     // Snow contribution
+    Field3D Ze_graupel;  // Graupel contribution
+    Field3D Ze_hail;     // Hail contribution
+    Field3D Ze_ice;      // Ice contribution
 
     /**
      * @brief Initialize all arrays to zero
@@ -130,21 +131,17 @@ struct RadarOut
     {
         NR = nr; NTH = nth; NZ = nz;
 
-        auto init_field = [&](auto& field) {
-            field.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-        };
-
-        init_field(Z_dBZ);
-        init_field(Vr);
-        init_field(ZDR_dB);
-        init_field(Ze_linear);
-        init_field(ZH_dBZ);
-        init_field(ZV_dBZ);
-        init_field(Ze_rain);
-        init_field(Ze_snow);
-        init_field(Ze_graupel);
-        init_field(Ze_hail);
-        init_field(Ze_ice);
+        Z_dBZ.resize(nr, nth, nz, 0.0f);
+        Vr.resize(nr, nth, nz, 0.0f);
+        ZDR_dB.resize(nr, nth, nz, 0.0f);
+        Ze_linear.resize(nr, nth, nz, 0.0f);
+        ZH_dBZ.resize(nr, nth, nz, 0.0f);
+        ZV_dBZ.resize(nr, nth, nz, 0.0f);
+        Ze_rain.resize(nr, nth, nz, 0.0f);
+        Ze_snow.resize(nr, nth, nz, 0.0f);
+        Ze_graupel.resize(nr, nth, nz, 0.0f);
+        Ze_hail.resize(nr, nth, nz, 0.0f);
+        Ze_ice.resize(nr, nth, nz, 0.0f);
     }
 };
 

@@ -1,6 +1,9 @@
 #include "kessler.hpp"
 #include <algorithm>
 #include <cmath>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 /* This is the constructor for the KesslerScheme class
 // It initializes the parameters for the Kessler scheme
@@ -35,46 +38,46 @@ Takes in the pressure, potential temperature, vapor mixing ratio, cloud water mi
 rainwater mixing ratio, ice mixing ratio, snow mixing ratio, graupel mixing ratio, and hail mixing ratio
 and computes the tendencies for the Kessler scheme.*/
 void KesslerScheme::compute_tendencies(
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& theta,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
+    const Field3D& p,
+    const Field3D& theta,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
     double dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqi_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt
+    Field3D& dtheta_dt,
+    Field3D& dqv_dt,
+    Field3D& dqc_dt,
+    Field3D& dqr_dt,
+    Field3D& dqi_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt
 ) 
 {
     // Get grid size
-    int NR = p.size();
+    int NR = p.size_r();
     if (NR == 0) return;
-    int NTH = p[0].size();
+    int NTH = p.size_th();
     if (NTH == 0) return;
-    int NZ = p[0][0].size();
+    int NZ = p.size_z();
 
     // Convert theta to temperature for microphysics calculations
-    std::vector<std::vector<std::vector<float>>> temperature;
+    Field3D temperature(NR, NTH, NZ);
     thermodynamics::convert_theta_to_temperature_field(theta, p, temperature);
 
     // Initialize tendency arrays to zero
-    dtheta_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqv_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqc_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqr_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqi_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqs_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqg_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqh_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    dtheta_dt.resize(NR, NTH, NZ, 0.0f);
+    dqv_dt.resize(NR, NTH, NZ, 0.0f);
+    dqc_dt.resize(NR, NTH, NZ, 0.0f);
+    dqr_dt.resize(NR, NTH, NZ, 0.0f);
+    dqi_dt.resize(NR, NTH, NZ, 0.0f);
+    dqs_dt.resize(NR, NTH, NZ, 0.0f);
+    dqg_dt.resize(NR, NTH, NZ, 0.0f);
+    dqh_dt.resize(NR, NTH, NZ, 0.0f);
 
     // Compute microphysical processes
     compute_warm_rain_processes(temperature, qv, qc, qr, dqc_dt, dqr_dt, dqv_dt, dtheta_dt);
@@ -83,6 +86,7 @@ void KesslerScheme::compute_tendencies(
     compute_sedimentation(qr, qg, qh, dqr_dt, dqg_dt, dqh_dt);
 
     // Iterate over all rows.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points.
@@ -94,7 +98,7 @@ void KesslerScheme::compute_tendencies(
                 // Convert temperature tendency to potential temperature tendency
                 dtheta_dt[i][j][k] = static_cast<float>(
                     thermodynamics::temperature_tendency_to_theta(
-                        dtheta_dt[i][j][k], theta[i][j][k], p[i][j][k]
+                        static_cast<float>(dtheta_dt[i][j][k]), static_cast<float>(theta[i][j][k]), static_cast<float>(p[i][j][k])
                     )
                 );
             }
@@ -107,22 +111,23 @@ Takes in the temperature, vapor mixing ratio, cloud water mixing ratio,
 rainwater mixing ratio, and the tendencies for the cloud water, rainwater, and vapor mixing ratios
 and computes the warm rain processes for the Kessler scheme.*/
 void KesslerScheme::compute_warm_rain_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt
+    const Field3D& temperature,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    Field3D& dqc_dt,
+    Field3D& dqr_dt,
+    Field3D& dqv_dt,
+    Field3D& dtheta_dt
 ) 
 {
     // Get grid size
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Compute warm rain processes by iterating over all grid points
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -132,10 +137,10 @@ void KesslerScheme::compute_warm_rain_processes(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qc_val = qc[i][j][k];
-                float qr_val = qr[i][j][k];
-                float qv_val = qv[i][j][k];
-                float T = temperature[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
 
                 // If the cloud water mixing ratio is greater than the critical cloud water mixing ratio, compute the autoconversion rate.
                 // Autoconversion: qc → qr when qc > qc0
@@ -183,25 +188,26 @@ Takes in the temperature, vapor mixing ratio, cloud water mixing ratio,
 rainwater mixing ratio, ice mixing ratio, snow mixing ratio, graupel mixing ratio, and hail mixing ratio
 and computes the ice processes for the Kessler scheme.*/
 void KesslerScheme::compute_ice_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt
+    const Field3D& temperature,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqc_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dqv_dt,
+    Field3D& dtheta_dt
 ) 
 {
     // Get grid size
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -304,21 +310,22 @@ Takes in the temperature, graupel mixing ratio, hail mixing ratio, and
 the tendencies for the graupel, hail, and rainwater mixing ratios
 and computes the melting processes for the Kessler scheme.*/
 void KesslerScheme::compute_melting_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt
+    const Field3D& temperature,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dqr_dt,
+    Field3D& dtheta_dt
 ) 
 {
     // Get grid size
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -328,9 +335,9 @@ void KesslerScheme::compute_melting_processes(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
-                float T = temperature[i][j][k];
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
 
                 // If the temperature is greater than the freezing temperature, compute the melting processes.
                 if (T > microphysics_constants::T0) 
@@ -366,24 +373,25 @@ Takes in the rainwater mixing ratio, graupel mixing ratio, hail mixing ratio,
 and the tendencies for the rainwater, graupel, and hail mixing ratios
 and computes the sedimentation for the Kessler scheme.*/
 void KesslerScheme::compute_sedimentation(
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt
+    const Field3D& qr,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqr_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt
 ) 
 {
     
 
-    int NR = qr.size();
-    int NTH = qr[0].size();
-    int NZ = qr[0][0].size();
+    int NR = qr.size_r();
+    int NTH = qr.size_th();
+    int NZ = qr.size_z();
 
     // Assume dz = 100.0 m (should be passed as parameter)
     const double dz = 100.0;
 
     // Iterate over all grid points.
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal points
@@ -393,35 +401,38 @@ void KesslerScheme::compute_sedimentation(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Rain sedimentation
-                if (qr[i][j][k] > 0.0f && k > 0) 
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                if (qr_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    float Vt_val = a_term_ * std::pow(std::max(qr[i][j][k], 1e-6f), b_term_);
+                    float Vt_val = a_term_ * std::pow(std::max(qr_val, 1e-6f), b_term_);
                     float Vt = std::min(static_cast<float>(Vt_max_), Vt_val);
-                    float sed_flux = Vt * qr[i][j][k];
+                    float sed_flux = Vt * qr_val;
                     dqr_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqr_dt[i][j][k + 1] += sed_flux / dz;
                 }
 
                 // If the graupel mixing ratio is greater than 0 and the vertical level is greater than 0, compute the sedimentation rate.
-                if (qg[i][j][k] > 0.0f && k > 0) 
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                if (qg_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    float Vt_val = a_grau_ * std::pow(std::max(qg[i][j][k], 1e-6f), b_grau_);
+                    float Vt_val = a_grau_ * std::pow(std::max(qg_val, 1e-6f), b_grau_);
                     float Vt = std::min(static_cast<float>(Vt_max_grau_), Vt_val);
-                    float sed_flux = Vt * qg[i][j][k];
+                    float sed_flux = Vt * qg_val;
                     dqg_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqg_dt[i][j][k + 1] += sed_flux / dz;
                 }
 
                 // If the hail mixing ratio is greater than 0 and the vertical level is greater than 0, compute the sedimentation rate.
                 // Hail sedimentation
-                if (qh[i][j][k] > 0.0f && k > 0) 
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                if (qh_val > 0.0f && k > 0) 
                 {
                     // Compute terminal velocity
-                    float Vt_val = a_hail_ * std::pow(std::max(qh[i][j][k], 1e-6f), b_hail_);
+                    float Vt_val = a_hail_ * std::pow(std::max(qh_val, 1e-6f), b_hail_);
                     float Vt = std::min(static_cast<float>(Vt_max_hail_), Vt_val);
-                    float sed_flux = Vt * qh[i][j][k];
+                    float sed_flux = Vt * qh_val;
                     dqh_dt[i][j][k] -= sed_flux / dz;
 
                     // If the vertical level is less than the number of vertical levels minus 1, compute the sedimentation rate.
@@ -437,23 +448,23 @@ Takes in the cloud water mixing ratio, rainwater mixing ratio, ice mixing ratio,
 snow mixing ratio, graupel mixing ratio, hail mixing ratio, and the radar 
 reflectivity field and computes the radar reflectivity for the Kessler scheme.*/
 void KesslerScheme::compute_radar_reflectivity(
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& reflectivity_dbz
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& reflectivity_dbz
 ) 
 {
     // Get grid size
-    int NR = qc.size();
+    int NR = qc.size_r();
     if (NR == 0) return;
-    int NTH = qc[0].size();
+    int NTH = qc.size_th();
     if (NTH == 0) return;
-    int NZ = qc[0][0].size();
+    int NZ = qc.size_z();
 
-    reflectivity_dbz.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    reflectivity_dbz.resize(NR, NTH, NZ, 0.0f);
 
     // Radar reflectivity constants (S-band)
     const float K_qc = 0.1e-3f;    // Cloud water
@@ -475,12 +486,12 @@ void KesslerScheme::compute_radar_reflectivity(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get hydrometeor values
-                float qc_val = qc[i][j][k];
-                float qr_val = qr[i][j][k];
-                float qi_val = qi[i][j][k];
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float qi_val = static_cast<float>(qi[i][j][k]);
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
 
                 // Compute linear radar reflectivity
                 float Z_linear = K_qc * std::pow(std::max(qc_val, 0.0f), alpha) +

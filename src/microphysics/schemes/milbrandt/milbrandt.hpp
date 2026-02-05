@@ -1,6 +1,7 @@
 #pragma once
 #include "../../base/thermodynamics.hpp"
 #include "microphysics_base.hpp"
+#include "field3d.hpp"
 
 /*This header file contains the declaration of the MilbrandtScheme class.
 This class implements the Milbrandt scheme.
@@ -42,21 +43,21 @@ private:
     bool hail_processes_;  // include hail category
 
     // Prognostic arrays for number concentrations and reflectivity
-    std::vector<std::vector<std::vector<float>>> Nr_;  // rain number (m⁻³)
-    std::vector<std::vector<std::vector<float>>> Ni_;  // ice number (m⁻³)
-    std::vector<std::vector<std::vector<float>>> Ns_;  // snow number (m⁻³)
-    std::vector<std::vector<std::vector<float>>> Ng_;  // graupel number (m⁻³)
-    std::vector<std::vector<std::vector<float>>> Nh_;  // hail number (m⁻³)
+    Field3D Nr_;  // rain number (m⁻³)
+    Field3D Ni_;  // ice number (m⁻³)
+    Field3D Ns_;  // snow number (m⁻³)
+    Field3D Ng_;  // graupel number (m⁻³)
+    Field3D Nh_;  // hail number (m⁻³)
 
-    std::vector<std::vector<std::vector<float>>> Zr_;  // rain reflectivity (mm⁶/m³)
-    std::vector<std::vector<std::vector<float>>> Zi_;  // ice reflectivity (mm⁶/m³)
-    std::vector<std::vector<std::vector<float>>> Zs_;  // snow reflectivity (mm⁶/m³)
-    std::vector<std::vector<std::vector<float>>> Zg_;  // graupel reflectivity (mm⁶/m³)
-    std::vector<std::vector<std::vector<float>>> Zh_;  // hail reflectivity (mm⁶/m³)
+    Field3D Zr_;  // rain reflectivity (mm⁶/m³)
+    Field3D Zi_;  // ice reflectivity (mm⁶/m³)
+    Field3D Zs_;  // snow reflectivity (mm⁶/m³)
+    Field3D Zg_;  // graupel reflectivity (mm⁶/m³)
+    Field3D Zh_;  // hail reflectivity (mm⁶/m³)
 
     // Tendency arrays
-    std::vector<std::vector<std::vector<float>>> dNr_dt_, dNi_dt_, dNs_dt_, dNg_dt_, dNh_dt_;
-    std::vector<std::vector<std::vector<float>>> dZr_dt_, dZi_dt_, dZs_dt_, dZg_dt_, dZh_dt_;
+    Field3D dNr_dt_, dNi_dt_, dNs_dt_, dNg_dt_, dNh_dt_;
+    Field3D dZr_dt_, dZi_dt_, dZs_dt_, dZg_dt_, dZh_dt_;
 
 public:
     /*This constructor initializes the Milbrandt scheme with default parameters.
@@ -88,24 +89,24 @@ public:
     rainwater mixing ratio, ice mixing ratio, snow mixing ratio, graupel mixing ratio, hail mixing ratio,
     and the time step and computes the tendencies for the Milbrandt scheme.*/
     void compute_tendencies(
-        const std::vector<std::vector<std::vector<float>>>& p,
-        const std::vector<std::vector<std::vector<float>>>& theta,
-        const std::vector<std::vector<std::vector<float>>>& qv,
-        const std::vector<std::vector<std::vector<float>>>& qc,
-        const std::vector<std::vector<std::vector<float>>>& qr,
-        const std::vector<std::vector<std::vector<float>>>& qi,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
+        const Field3D& p,
+        const Field3D& theta,
+        const Field3D& qv,
+        const Field3D& qc,
+        const Field3D& qr,
+        const Field3D& qi,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
         double dt,
-        std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-        std::vector<std::vector<std::vector<float>>>& dqv_dt,
-        std::vector<std::vector<std::vector<float>>>& dqc_dt,
-        std::vector<std::vector<std::vector<float>>>& dqr_dt,
-        std::vector<std::vector<std::vector<float>>>& dqi_dt,
-        std::vector<std::vector<std::vector<float>>>& dqs_dt,
-        std::vector<std::vector<std::vector<float>>>& dqg_dt,
-        std::vector<std::vector<std::vector<float>>>& dqh_dt
+        Field3D& dtheta_dt,
+        Field3D& dqv_dt,
+        Field3D& dqc_dt,
+        Field3D& dqr_dt,
+        Field3D& dqi_dt,
+        Field3D& dqs_dt,
+        Field3D& dqg_dt,
+        Field3D& dqh_dt
     ) override;
 
     /*This function computes the radar reflectivity for the Milbrandt scheme.
@@ -113,13 +114,13 @@ public:
     snow mixing ratio, graupel mixing ratio, hail mixing ratio, and the radar reflectivity 
     fieldand computes the radar reflectivity for the Milbrandt scheme.*/
     void compute_radar_reflectivity(
-        const std::vector<std::vector<std::vector<float>>>& qc,
-        const std::vector<std::vector<std::vector<float>>>& qr,
-        const std::vector<std::vector<std::vector<float>>>& qi,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
-        std::vector<std::vector<std::vector<float>>>& reflectivity_dbz
+        const Field3D& qc,
+        const Field3D& qr,
+        const Field3D& qi,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
+        Field3D& reflectivity_dbz
     ) override;
 
     /*This function returns the name of the Milbrandt scheme.
@@ -162,17 +163,17 @@ private:
     rainwater mixing ratio, and the tendencies for the cloud water, rainwater, and vapor mixing ratios
     and computes the warm rain processes for the Milbrandt scheme.*/
     void compute_warm_rain_processes(
-        const std::vector<std::vector<std::vector<float>>>& temperature,
-        const std::vector<std::vector<std::vector<float>>>& p,
-        const std::vector<std::vector<std::vector<float>>>& rho,
-        const std::vector<std::vector<std::vector<float>>>& qv,
-        const std::vector<std::vector<std::vector<float>>>& qc,
-        const std::vector<std::vector<std::vector<float>>>& qr,
-        std::vector<std::vector<std::vector<float>>>& dqc_dt,
-        std::vector<std::vector<std::vector<float>>>& dqr_dt,
-        std::vector<std::vector<std::vector<float>>>& dqv_dt,
-        std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-        std::vector<std::vector<std::vector<float>>>& dNr_dt
+        const Field3D& temperature,
+        const Field3D& p,
+        const Field3D& rho,
+        const Field3D& qv,
+        const Field3D& qc,
+        const Field3D& qr,
+        Field3D& dqc_dt,
+        Field3D& dqr_dt,
+        Field3D& dqv_dt,
+        Field3D& dtheta_dt,
+        Field3D& dNr_dt
     );
 
     /*This function computes the ice processes for the Milbrandt scheme.
@@ -181,26 +182,26 @@ private:
     and the tendencies for the cloud water, ice, snow, graupel, hail, and vapor mixing ratios
     and computes the ice processes for the Milbrandt scheme.*/
     void compute_ice_processes(
-        const std::vector<std::vector<std::vector<float>>>& temperature,
-        const std::vector<std::vector<std::vector<float>>>& p,
-        const std::vector<std::vector<std::vector<float>>>& rho,
-        const std::vector<std::vector<std::vector<float>>>& qv,
-        const std::vector<std::vector<std::vector<float>>>& qc,
-        const std::vector<std::vector<std::vector<float>>>& qi,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
-        std::vector<std::vector<std::vector<float>>>& dqc_dt,
-        std::vector<std::vector<std::vector<float>>>& dqi_dt,
-        std::vector<std::vector<std::vector<float>>>& dqs_dt,
-        std::vector<std::vector<std::vector<float>>>& dqg_dt,
-        std::vector<std::vector<std::vector<float>>>& dqh_dt,
-        std::vector<std::vector<std::vector<float>>>& dqv_dt,
-        std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-        std::vector<std::vector<std::vector<float>>>& dNi_dt,
-        std::vector<std::vector<std::vector<float>>>& dNs_dt,
-        std::vector<std::vector<std::vector<float>>>& dNg_dt,
-        std::vector<std::vector<std::vector<float>>>& dNh_dt
+        const Field3D& temperature,
+        const Field3D& p,
+        const Field3D& rho,
+        const Field3D& qv,
+        const Field3D& qc,
+        const Field3D& qi,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
+        Field3D& dqc_dt,
+        Field3D& dqi_dt,
+        Field3D& dqs_dt,
+        Field3D& dqg_dt,
+        Field3D& dqh_dt,
+        Field3D& dqv_dt,
+        Field3D& dtheta_dt,
+        Field3D& dNi_dt,
+        Field3D& dNs_dt,
+        Field3D& dNg_dt,
+        Field3D& dNh_dt
     );
 
     /*This function computes the melting processes for the Milbrandt scheme.
@@ -208,19 +209,19 @@ private:
     and the tendencies for the snow, graupel, hail, and rainwater mixing ratios
     and computes the melting processes for the Milbrandt scheme.*/
     void compute_melting_processes(
-        const std::vector<std::vector<std::vector<float>>>& temperature,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
-        std::vector<std::vector<std::vector<float>>>& dqs_dt,
-        std::vector<std::vector<std::vector<float>>>& dqg_dt,
-        std::vector<std::vector<std::vector<float>>>& dqh_dt,
-        std::vector<std::vector<std::vector<float>>>& dqr_dt,
-        std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-        std::vector<std::vector<std::vector<float>>>& dNr_dt,
-        std::vector<std::vector<std::vector<float>>>& dNs_dt,
-        std::vector<std::vector<std::vector<float>>>& dNg_dt,
-        std::vector<std::vector<std::vector<float>>>& dNh_dt
+        const Field3D& temperature,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
+        Field3D& dqs_dt,
+        Field3D& dqg_dt,
+        Field3D& dqh_dt,
+        Field3D& dqr_dt,
+        Field3D& dtheta_dt,
+        Field3D& dNr_dt,
+        Field3D& dNs_dt,
+        Field3D& dNg_dt,
+        Field3D& dNh_dt
     );
 
     /*This function computes the sedimentation for the Milbrandt scheme.
@@ -228,22 +229,22 @@ private:
     hail mixing ratio, and the tendencies for the rainwater, snow, graupel, 
     and hail mixing ratios and computes the sedimentation for the Milbrandt scheme.*/
     void compute_sedimentation(
-        const std::vector<std::vector<std::vector<float>>>& qr,
-        const std::vector<std::vector<std::vector<float>>>& qs,
-        const std::vector<std::vector<std::vector<float>>>& qg,
-        const std::vector<std::vector<std::vector<float>>>& qh,
-        const std::vector<std::vector<std::vector<float>>>& Nr,
-        const std::vector<std::vector<std::vector<float>>>& Ns,
-        const std::vector<std::vector<std::vector<float>>>& Ng,
-        const std::vector<std::vector<std::vector<float>>>& Nh,
-        std::vector<std::vector<std::vector<float>>>& dqr_dt,
-        std::vector<std::vector<std::vector<float>>>& dqs_dt,
-        std::vector<std::vector<std::vector<float>>>& dqg_dt,
-        std::vector<std::vector<std::vector<float>>>& dqh_dt,
-        std::vector<std::vector<std::vector<float>>>& dNr_dt,
-        std::vector<std::vector<std::vector<float>>>& dNs_dt,
-        std::vector<std::vector<std::vector<float>>>& dNg_dt,
-        std::vector<std::vector<std::vector<float>>>& dNh_dt
+        const Field3D& qr,
+        const Field3D& qs,
+        const Field3D& qg,
+        const Field3D& qh,
+        const Field3D& Nr,
+        const Field3D& Ns,
+        const Field3D& Ng,
+        const Field3D& Nh,
+        Field3D& dqr_dt,
+        Field3D& dqs_dt,
+        Field3D& dqg_dt,
+        Field3D& dqh_dt,
+        Field3D& dNr_dt,
+        Field3D& dNs_dt,
+        Field3D& dNg_dt,
+        Field3D& dNh_dt
     );
 
     // Gamma function for moment calculations

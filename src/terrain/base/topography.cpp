@@ -74,10 +74,7 @@ ScharResult eval_schar(double x, const TerrainConfig::ScharParams& params)
     return result;
 }
 
-// TerrainFollowingCoordinate methods - temporarily commented out due to compilation issues
-// TODO: Fix namespace issues for terrain coordinate transformations
-
-/*
+// TerrainFollowingCoordinate methods
 TerrainFollowingCoordinate::TerrainFollowingCoordinate(const TerrainConfig& cfg, const Topography2D& topo)
     : config_(cfg), topography_(topo) 
 {
@@ -95,8 +92,8 @@ double TerrainFollowingCoordinate::zeta_to_z(double zeta, int i, int j) const
         return zeta + h * (1.0 - zeta / ztop);
     }
     // If the coordinate id is "smoothed", evaluate the smoothed coordinate surfaces.
-     else if (config_.coord_id == "smoothed") 
-     {
+    else if (config_.coord_id == "smoothed") 
+    {
         // Smoothed coordinate surfaces
         double h_eff = apply_coordinate_smoothing(h, zeta);
         return zeta + h_eff * (1.0 - zeta / ztop);
@@ -108,7 +105,7 @@ double TerrainFollowingCoordinate::zeta_to_z(double zeta, int i, int j) const
     }
 }
 
-/*This function converts the z coordinate to the zeta coordinate.
+/*This function converts the z coordinate to the zeta coordinate.*/
 double TerrainFollowingCoordinate::z_to_zeta(double z, int i, int j) const 
 {
     double h = topography_.h[i][j];
@@ -131,7 +128,7 @@ double TerrainFollowingCoordinate::z_to_zeta(double z, int i, int j) const
             return z;
         }
     } 
-        else {
+    else {
         return z;  // Cartesian
     }
 }
@@ -169,7 +166,7 @@ void TerrainFollowingCoordinate::compute_metrics(double zeta, int i, int j,
         }
     }
     // If the coordinate id is "smoothed", evaluate the smoothed coordinate surfaces.   
-         else if (config_.coord_id == "smoothed") {
+    else if (config_.coord_id == "smoothed") {
         // Smoothed coordinate surfaces (simplified)
         double h_eff = apply_coordinate_smoothing(h, zeta);
         double hx_eff = hx;  // simplified - would need proper smoothing
@@ -196,12 +193,12 @@ void TerrainFollowingCoordinate::compute_metrics(double zeta, int i, int j,
     }
 }
 
-double TerrainFollowingCoordinate::apply_coordinate_smoothing(double h, double zeta) const {
+double TerrainFollowingCoordinate::apply_coordinate_smoothing(double h, double zeta) const 
+{
     // Exponential decay of terrain influence with height
     double decay_factor = std::exp(-config_.smoothing_decay * zeta / config_.ztop);
     return h * decay_factor;
 }
-*/
 
 /*This function initializes the topography.
 Takes in the topography and the number of rows and columns and initializes the topography.*/

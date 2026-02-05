@@ -41,13 +41,6 @@ nested:
   size_r: 32
   size_th: 32
   size_z: 32
-microphysics:
-  scheme: kessler
-  qc0: 0.001
-  c_auto: 0.001
-  c_accr: 2.2
-  c_evap: 0.003
-  hail_graupel_enabled: false
 radiation:
   scheme: simple_grey
   do_lw: true

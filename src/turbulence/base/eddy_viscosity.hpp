@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include "../../../include/turbulence_base.hpp"
+#include "../../../include/field3d.hpp"
 
 // Eddy viscosity and turbulence utilities for turbulence schemes
 namespace eddy_viscosity 
@@ -57,8 +58,8 @@ Takes in the state, grid, the eddy diffusivities, and the scalar and computes th
 double compute_scalar_diffusion_tendency(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
-    const std::vector<std::vector<std::vector<float>>>& K_field,  // diffusivity field
-    const std::vector<std::vector<std::vector<float>>>& phi,      // scalar field
+    const Field3D& K_field,  // diffusivity field
+    const Field3D& phi,      // scalar field
     int i, int j, int k,  // grid indices
     int var_index        // 0=u, 1=v, 2=w, 3=theta, 4=qv, 5=tke
 );
@@ -68,10 +69,10 @@ Takes in the state, grid, the eddy viscosity, and the momentum and computes the 
 void compute_momentum_diffusion_tendencies(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
-    const std::vector<std::vector<std::vector<float>>>& nu_t,  // eddy viscosity
-    std::vector<std::vector<std::vector<float>>>& dudt_sgs,
-    std::vector<std::vector<std::vector<float>>>& dvdt_sgs,
-    std::vector<std::vector<std::vector<float>>>& dwdt_sgs
+    const Field3D& nu_t,  // eddy viscosity
+    Field3D& dudt_sgs,
+    Field3D& dvdt_sgs,
+    Field3D& dwdt_sgs
 );
 
 /*This function computes the scalar diffusion tendencies.
@@ -79,9 +80,9 @@ Takes in the state, grid, the eddy diffusivities, and the scalar and computes th
 void compute_scalar_diffusion_tendencies(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
-    const std::vector<std::vector<std::vector<float>>>& K_field,  // diffusivity
-    const std::vector<std::vector<std::vector<float>>>& phi,      // scalar field
-    std::vector<std::vector<std::vector<float>>>& dphi_dt_sgs     // tendency output
+    const Field3D& K_field,  // diffusivity
+    const Field3D& phi,      // scalar field
+    Field3D& dphi_dt_sgs     // tendency output
 );
 
 /*This function computes the stability correction.
@@ -110,17 +111,9 @@ double compute_brunt_vaisala_frequency(
 /*This function applies the positivity limits.
 Takes in the field, minimum value, and maximum value and applies the positivity limits.*/
 void apply_positivity_limits(
-    std::vector<std::vector<std::vector<float>>>& field,
+    Field3D& field,
     double min_value = 0.0,
     double max_value = 1e6
-);
-
-/*This function initializes the 3D field.
-Takes in the field, number of rows, number of columns, number of levels, and the value and initializes the 3D field.*/
-void initialize_3d_field(
-    std::vector<std::vector<std::vector<float>>>& field,
-    int NR, int NTH, int NZ,
-    float value = 0.0f
 );
 
 } // namespace eddy_viscosity

@@ -32,13 +32,35 @@ void initialize_turbulence(const std::string& scheme_name,
 
 // Step turbulence forward in time
 void step_turbulence(double current_time, TurbulenceTendencies& tendencies) {
-    if (!turbulence_scheme) return;
+    if (!turbulence_scheme) {
+        // Initialize empty tendencies if scheme not available
+        tendencies.dudt_sgs.resize(NR, NTH, NZ, 0.0f);
+        tendencies.dvdt_sgs.resize(NR, NTH, NZ, 0.0f);
+        tendencies.dwdt_sgs.resize(NR, NTH, NZ, 0.0f);
+        tendencies.dthetadt_sgs.resize(NR, NTH, NZ, 0.0f);
+        tendencies.dqvdt_sgs.resize(NR, NTH, NZ, 0.0f);
+        tendencies.dtkedt_sgs.resize(NR, NTH, NZ, 0.0f);
+        return;
+    }
 
     // Only compute turbulence at specified cadence
     static double last_turbulence_time = -global_turbulence_config.dt_sgs;
+    static TurbulenceTendencies cached_tendencies;  // Cache tendencies between cadence calls
 
     if (current_time - last_turbulence_time < global_turbulence_config.dt_sgs) {
-        // Hold previous tendencies
+        // Return cached tendencies (ensure they're allocated)
+        if (cached_tendencies.dudt_sgs.empty()) {
+            // First call, initialize empty tendencies
+            tendencies.dudt_sgs.resize(NR, NTH, NZ, 0.0f);
+            tendencies.dvdt_sgs.resize(NR, NTH, NZ, 0.0f);
+            tendencies.dwdt_sgs.resize(NR, NTH, NZ, 0.0f);
+            tendencies.dthetadt_sgs.resize(NR, NTH, NZ, 0.0f);
+            tendencies.dqvdt_sgs.resize(NR, NTH, NZ, 0.0f);
+            tendencies.dtkedt_sgs.resize(NR, NTH, NZ, 0.0f);
+        } else {
+            // Return cached tendencies
+            tendencies = cached_tendencies;
+        }
         return;
     }
 
@@ -72,13 +94,16 @@ void step_turbulence(double current_time, TurbulenceTendencies& tendencies) {
     }
 
     // Resize tendency arrays
-    eddy_viscosity::initialize_3d_field(tendencies.dudt_sgs, NR, NTH, NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tendencies.dvdt_sgs, NR, NTH, NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tendencies.dwdt_sgs, NR, NTH, NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tendencies.dthetadt_sgs, NR, NTH, NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tendencies.dqvdt_sgs, NR, NTH, NZ, 0.0f);
-    eddy_viscosity::initialize_3d_field(tendencies.dtkedt_sgs, NR, NTH, NZ, 0.0f);
+    tendencies.dudt_sgs.resize(NR, NTH, NZ, 0.0f);
+    tendencies.dvdt_sgs.resize(NR, NTH, NZ, 0.0f);
+    tendencies.dwdt_sgs.resize(NR, NTH, NZ, 0.0f);
+    tendencies.dthetadt_sgs.resize(NR, NTH, NZ, 0.0f);
+    tendencies.dqvdt_sgs.resize(NR, NTH, NZ, 0.0f);
+    tendencies.dtkedt_sgs.resize(NR, NTH, NZ, 0.0f);
 
     // Compute turbulence
     turbulence_scheme->compute(global_turbulence_config, grid, state, tendencies);
+    
+    // Cache tendencies for use between cadence calls
+    cached_tendencies = tendencies;
 }

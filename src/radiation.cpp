@@ -10,8 +10,7 @@ It manages the initialization of the radiation system and the computation of the
 std::unique_ptr<RadiationSchemeBase> radiation_scheme = nullptr;
 RadiationConfig global_radiation_config;
 
-// Radiation tendency field
-std::vector<std::vector<std::vector<float>>> dtheta_dt_rad;
+// Radiation tendency field (declared in simulation.hpp as extern Field3D)
 
 /*This function initializes the radiation scheme.
 Takes in the scheme name and configuration and initializes the radiation scheme.*/
@@ -25,7 +24,7 @@ void initialize_radiation(const std::string& scheme_name, const RadiationConfig&
         std::cout << "Initialized radiation scheme: " << scheme_name << std::endl;
 
         // Resize radiation tendency field
-        dtheta_dt_rad.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+        dtheta_dt_rad.resize(NR, NTH, NZ, 0.0f);
 
     } 
     catch (const std::exception& e) 
@@ -69,7 +68,21 @@ void step_radiation(double current_time)
             {
                 // theta to T conversion: T = theta * (p/p0)^(R/cp)
                 double kappa = R_d / cp;
-                T_col[k] = theta[i][j][k] * pow(p[i][j][k] / p0, kappa);
+                double theta_val = theta[i][j][k];
+                double p_val = p[i][j][k];
+                
+                // Safety check: ensure theta and pressure are physically reasonable
+                if (theta_val < 200.0 || theta_val > 500.0 || p_val < 10000.0 || p_val > 120000.0) {
+                    // Use a default temperature profile if values are corrupted
+                    double z = k * dz;
+                    T_col[k] = theta0 - 0.0065 * z;  // dry adiabatic lapse rate
+                    if (i == 0 && j == 0 && k < 3) {
+                        std::cerr << "[RADIATION WARNING] Invalid theta/p at i=" << i << ",j=" << j << ",k=" << k 
+                                  << ": theta=" << theta_val << "K, p=" << p_val << "Pa, using default T=" << T_col[k] << "K" << std::endl;
+                    }
+                } else {
+                    T_col[k] = theta_val * pow(p_val / p0, kappa);
+                }
             }
             col.T = &T_col;
 

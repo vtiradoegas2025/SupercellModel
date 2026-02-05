@@ -19,11 +19,12 @@ except ImportError:
 def load_grid_parameters():
     """Load grid parameters from the simulation (these should match equations.cpp)"""
     # These values should match your C++ simulation
-    NR = 200   # radial points
+    # Updated to match classic.yaml config: nx=256, ny=128, nz=128
+    NR = 256   # radial points
     NTH = 128  # azimuthal points
-    NZ = 128   # vertical points (corrected to match actual data)
-    dr = 100.0  # radial resolution (m)
-    dz = 100.0  # vertical resolution (m)
+    NZ = 128   # vertical points
+    dr = 1000.0  # radial resolution (m) - matches config grid.dx
+    dz = 100.0  # vertical resolution (m) - matches config grid.dz
 
     # Create coordinate arrays (cylindrical)
     r_coords = np.arange(NR) * dr
@@ -119,6 +120,34 @@ def load_theta_slice_data(step_dir, field_name, NR, NTH, NZ):
     # Stack into 3D array (NR, NTH, NZ)
     return np.stack(data_slices, axis=1)
 
+def auto_detect_fields(input_dir, NR, NTH, NZ):
+    """
+    Auto-detect available fields by scanning the first timestep directory.
+    
+    Args:
+        input_dir: Path to directory containing step_*/ subdirs
+        NR, NTH, NZ: Grid dimensions
+    
+    Returns:
+        List of detected field names
+    """
+    step_dirs = sorted(glob.glob(str(Path(input_dir) / "step_*")))
+    if not step_dirs:
+        return []
+    
+    # Scan first timestep directory
+    first_step_dir = Path(step_dirs[0])
+    detected_fields = set()
+    
+    # Look for files matching pattern th{theta_idx}_{field_name}.npy
+    for npy_file in first_step_dir.glob("th*_*.npy"):
+        # Extract field name from filename like "th0_theta.npy" -> "theta"
+        parts = npy_file.stem.split("_", 1)  # Split on first underscore
+        if len(parts) == 2:
+            field_name = parts[1]  # Everything after "th0_"
+            detected_fields.add(field_name)
+    
+    return sorted(list(detected_fields))
 
 def create_zarr_metadata(store, grid_params, case_name="converted"):
     """Create Zarr metadata as per supercell spec"""
@@ -194,11 +223,20 @@ def main():
     parser = argparse.ArgumentParser(description="Convert NPY exports to Zarr format")
     parser.add_argument("--input", help="Input directory with step_*/ subdirs")
     parser.add_argument("--output", help="Output Zarr file path")
-    parser.add_argument("--fields", nargs="+", default=["theta", "qr", "u", "v", "w", "rho", "p", "radar"],
-                       help="Fields to convert")
+    parser.add_argument("--fields", nargs="+", default=["theta", "qv", "qc", "qr", "qh", "qg", "u", "v", "w", "rho", "p", "radar", "tracer"],
+                       help="Fields to convert (default includes all exported fields)")
+    parser.add_argument("--auto-detect-fields", action="store_true",
+                       help="Auto-detect available fields from first timestep directory")
+    parser.add_argument("--validate-data", action="store_true",
+                       help="Validate data quality (check for NaN, report statistics)")
     parser.add_argument("--max_timesteps", type=int, help="Maximum timesteps to convert")
     parser.add_argument("--diagnose", help="Diagnose existing Zarr file instead of converting")
     args = parser.parse_args()
+
+    # Check if zarr is available
+    if not ZARR_AVAILABLE:
+        print("Error: zarr package not installed. Install with: pip install zarr")
+        return
 
     # Handle diagnose mode
     if args.diagnose:
@@ -224,6 +262,17 @@ def main():
 
     print(f"Found {len(step_dirs)} timesteps")
 
+    # Auto-detect fields if requested
+    fields_to_convert = args.fields
+    if args.auto_detect_fields:
+        detected_fields = auto_detect_fields(input_dir, NR, NTH, NZ)
+        if detected_fields:
+            fields_to_convert = detected_fields
+            print(f"Auto-detected {len(detected_fields)} fields: {', '.join(detected_fields)}")
+        else:
+            print("Warning: No fields detected, using default field list")
+            print(f"Using default fields: {', '.join(fields_to_convert)}")
+
     # Create Zarr store
     store = zarr.open(str(output_path), mode='w')
 
@@ -236,13 +285,13 @@ def main():
     actual_timesteps = min(max_timesteps, len(step_dirs))
 
     # Collect all data first
-    field_data = {field: [] for field in args.fields}
+    field_data = {field: [] for field in fields_to_convert}
 
     for i in tqdm(range(actual_timesteps), desc="Loading data"):
         step_path = Path(step_dirs[i])
         step_dir = str(step_path)
 
-        for field_name in args.fields:
+        for field_name in fields_to_convert:
             # Load cylindrical data
             data_cylindrical = load_theta_slice_data(step_dir, field_name, NR, NTH, NZ)
             if data_cylindrical is None:
@@ -254,6 +303,16 @@ def main():
                 r_coords, theta_coords, z_coords, data_cylindrical
             )
 
+            # Optional data validation
+            if args.validate_data and i == 0:  # Only validate first timestep for performance
+                nan_count = np.isnan(data_cartesian).sum()
+                nan_fraction = nan_count / data_cartesian.size
+                data_min = np.nanmin(data_cartesian)
+                data_max = np.nanmax(data_cartesian)
+                data_mean = np.nanmean(data_cartesian)
+                print(f"  {field_name}: min={data_min:.4e}, max={data_max:.4e}, mean={data_mean:.4e}, "
+                      f"NaN={nan_count} ({100*nan_fraction:.2f}%)")
+
             field_data[field_name].append(data_cartesian)
 
     # Store as single arrays
@@ -263,6 +322,7 @@ def main():
             field_array = np.stack(data_list, axis=0)
 
             # Map field names to visualization-friendly names
+            # Note: The simulation exports "radar" but visualization expects "reflectivity_dbz"
             if field_name == "radar":
                 store_name = "reflectivity_dbz"
             else:

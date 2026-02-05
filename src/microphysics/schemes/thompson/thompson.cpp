@@ -1,6 +1,9 @@
 #include "thompson.hpp"
 #include <algorithm>
 #include <cmath>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 
 /*This constructor initializes the Thompson scheme with default parameters.
@@ -20,56 +23,56 @@ Takes in the pressure, potential temperature, vapor mixing ratio, cloud water mi
 rainwater mixing ratio, ice mixing ratio, snow mixing ratio, graupel mixing ratio, hail mixing ratio,
 and the time step and computes the tendencies for the Thompson scheme.*/
 void ThompsonScheme::compute_tendencies(
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& theta,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
+    const Field3D& p,
+    const Field3D& theta,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
     double dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqi_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt
+    Field3D& dtheta_dt,
+    Field3D& dqv_dt,
+    Field3D& dqc_dt,
+    Field3D& dqr_dt,
+    Field3D& dqi_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt
 ) 
 {
 
-    int NR = p.size();
+    int NR = p.size_r();
     if (NR == 0) return;
-    int NTH = p[0].size();
-    int NZ = p[0][0].size();
+    int NTH = p.size_th();
+    int NZ = p.size_z();
 
     // If the ice number concentration is not already initialized, initialize it.
     if (Ni_.empty()) 
     {
-        Ni_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, in_conc_ * 1e-6)));  // Convert m⁻³ to cm⁻³
+        Ni_.resize(NR, NTH, NZ, in_conc_ * 1e-6f);  // Convert m⁻³ to cm⁻³
     }
 
     // Convert theta to temperature
-    std::vector<std::vector<std::vector<float>>> temperature;
+    Field3D temperature(NR, NTH, NZ);
     thermodynamics::convert_theta_to_temperature_field(theta, p, temperature);
 
     // Initialize tendency arrays
-    dtheta_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqv_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqc_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqr_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqi_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqs_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqg_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dqh_dt.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
-    dNi_dt_.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    dtheta_dt.resize(NR, NTH, NZ, 0.0f);
+    dqv_dt.resize(NR, NTH, NZ, 0.0f);
+    dqc_dt.resize(NR, NTH, NZ, 0.0f);
+    dqr_dt.resize(NR, NTH, NZ, 0.0f);
+    dqi_dt.resize(NR, NTH, NZ, 0.0f);
+    dqs_dt.resize(NR, NTH, NZ, 0.0f);
+    dqg_dt.resize(NR, NTH, NZ, 0.0f);
+    dqh_dt.resize(NR, NTH, NZ, 0.0f);
+    dNi_dt_.resize(NR, NTH, NZ, 0.0f);
 
     // Saturation adjustment
-    auto qv_temp = qv;
-    auto qc_temp = qc;
+    Field3D qv_temp = qv;
+    Field3D qc_temp = qc;
     saturation_adjustment(temperature, p, qv_temp, qc_temp);
 
     // Compute microphysical processes
@@ -80,6 +83,7 @@ void ThompsonScheme::compute_tendencies(
     compute_sedimentation(qr, qs, qg, qh, dqr_dt, dqs_dt, dqg_dt, dqh_dt);
 
     // Iterate over all grid points and update Ni
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal angles
@@ -90,12 +94,13 @@ void ThompsonScheme::compute_tendencies(
             {
                 // Update Ni
                 Ni_[i][j][k] += dNi_dt_[i][j][k] * dt;
-                Ni_[i][j][k] = std::max(Ni_[i][j][k], 1.0f);  // Minimum concentration
+                Ni_[i][j][k] = std::max(static_cast<float>(Ni_[i][j][k]), 1.0f);  // Minimum concentration
             }
         }
     }
 
     // Iterate over all grid points and update temperature tendencies to potential temperature tendencies
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal angles
@@ -107,7 +112,7 @@ void ThompsonScheme::compute_tendencies(
                 // Update temperature tendencies to potential temperature tendencies
                 dtheta_dt[i][j][k] = static_cast<float>(
                     thermodynamics::temperature_tendency_to_theta(
-                        dtheta_dt[i][j][k], theta[i][j][k], p[i][j][k]
+                        static_cast<float>(dtheta_dt[i][j][k]), static_cast<float>(theta[i][j][k]), static_cast<float>(p[i][j][k])
                     )
                 );
             }
@@ -119,17 +124,18 @@ void ThompsonScheme::compute_tendencies(
 Takes in the temperature, pressure, vapor mixing ratio, and cloud water mixing ratio
 and performs the saturation adjustment for the Thompson scheme.*/
 void ThompsonScheme::saturation_adjustment(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    std::vector<std::vector<std::vector<float>>>& qv,
-    std::vector<std::vector<std::vector<float>>>& qc
+    const Field3D& temperature,
+    const Field3D& p,
+    Field3D& qv,
+    Field3D& qc
 ) 
 {
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points and perform saturation adjustment
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal angles
@@ -139,14 +145,15 @@ void ThompsonScheme::saturation_adjustment(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get current temperature and pressure
-                float T = temperature[i][j][k];
-                float P = p[i][j][k];
+                float T = static_cast<float>(temperature[i][j][k]);
+                float P = static_cast<float>(p[i][j][k]);
                 float qvsat = thermodynamics::saturation_mixing_ratio_water(T, P);
 
                 // If the vapor mixing ratio is greater than the saturation mixing ratio, compute the excess
-                if (qv[i][j][k] > qvsat) 
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                if (qv_val > qvsat) 
                 {
-                    float excess = qv[i][j][k] - qvsat;
+                    float excess = qv_val - qvsat;
                     qc[i][j][k] += excess;
                     qv[i][j][k] = qvsat;
                 }
@@ -160,23 +167,24 @@ Takes in the temperature, pressure, vapor mixing ratio, cloud water mixing ratio
 rainwater mixing ratio, and the tendencies for the cloud water, rainwater, and vapor mixing ratios
 and computes the warm rain processes for the Thompson scheme.*/
 void ThompsonScheme::compute_warm_rain_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt
+    const Field3D& temperature,
+    const Field3D& p,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qr,
+    Field3D& dqc_dt,
+    Field3D& dqr_dt,
+    Field3D& dqv_dt,
+    Field3D& dtheta_dt
 ) 
 {
     // Iterate over all grid points and compute warm rain processes
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points and compute warm rain processes
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < NR; ++i) 
     {
         // Iterate over all azimuthal angles
@@ -185,11 +193,11 @@ void ThompsonScheme::compute_warm_rain_processes(
             // Iterate over all vertical levels
             for (int k = 0; k < NZ; ++k) 
             {
-                float qc_val = qc[i][j][k];
-                float qr_val = qr[i][j][k];
-                float qv_val = qv[i][j][k];
-                float T = temperature[i][j][k];
-                float P = p[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
+                float P = static_cast<float>(p[i][j][k]);
 
                 // If the cloud water mixing ratio is greater than the autoconversion threshold, compute the autoconversion rate
                 if (qc_val > qc0_) 
@@ -241,28 +249,28 @@ ice mixing ratio, snow mixing ratio, graupel mixing ratio, hail mixing ratio,
 and the tendencies for the cloud water, ice, snow, graupel, hail, and vapor mixing ratios
 and computes the ice processes for the Thompson scheme.*/
 void ThompsonScheme::compute_ice_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& p,
-    const std::vector<std::vector<std::vector<float>>>& qv,
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqc_dt,
-    std::vector<std::vector<std::vector<float>>>& dqi_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dqv_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt,
-    std::vector<std::vector<std::vector<float>>>& dNi_dt
+    const Field3D& temperature,
+    const Field3D& p,
+    const Field3D& qv,
+    const Field3D& qc,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqc_dt,
+    Field3D& dqi_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dqv_dt,
+    Field3D& dtheta_dt,
+    Field3D& dNi_dt
 ) 
 {
     // Iterate over all grid points and compute ice processes
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points and compute ice processes
     for (int i = 0; i < NR; ++i) 
@@ -273,13 +281,13 @@ void ThompsonScheme::compute_ice_processes(
             // Iterate over all vertical levels
             for (int k = 0; k < NZ; ++k) 
             {
-                float qc_val = qc[i][j][k];
-                float qi_val = qi[i][j][k];
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qv_val = qv[i][j][k];
-                float T = temperature[i][j][k];
-                float P = p[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qi_val = static_cast<float>(qi[i][j][k]);
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qv_val = static_cast<float>(qv[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
+                float P = static_cast<float>(p[i][j][k]);
                 float T_celsius = T - microphysics_constants::T0;
                 float Ni_val = Ni_[i][j][k];
 
@@ -384,20 +392,20 @@ Takes in the temperature, snow mixing ratio, graupel mixing ratio, hail mixing r
 and the tendencies for the snow, graupel, hail, and rainwater mixing ratios
 and computes the melting processes for the Thompson scheme.*/
 void ThompsonScheme::compute_melting_processes(
-    const std::vector<std::vector<std::vector<float>>>& temperature,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dtheta_dt
+    const Field3D& temperature,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt,
+    Field3D& dqr_dt,
+    Field3D& dtheta_dt
 ) 
 {
-    int NR = temperature.size();
-    int NTH = temperature[0].size();
-    int NZ = temperature[0][0].size();
+    int NR = temperature.size_r();
+    int NTH = temperature.size_th();
+    int NZ = temperature.size_z();
 
     // Iterate over all grid points and compute melting processes
     for (int i = 0; i < NR; ++i) 
@@ -408,10 +416,10 @@ void ThompsonScheme::compute_melting_processes(
             // Iterate over all vertical levels and compute melting processes
             for (int k = 0; k < NZ; ++k) 
             {
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
-                float T = temperature[i][j][k];
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                float T = static_cast<float>(temperature[i][j][k]);
 
                 // If the temperature is greater than the freezing point, compute the melting rate
                 if (T > microphysics_constants::T0) 
@@ -453,20 +461,20 @@ Takes in the rainwater mixing ratio, snow mixing ratio, graupel mixing ratio, ha
 and the tendencies for the rainwater, snow, graupel, and hail mixing ratios
 and computes the sedimentation for the Thompson scheme.*/
 void ThompsonScheme::compute_sedimentation(
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& dqr_dt,
-    std::vector<std::vector<std::vector<float>>>& dqs_dt,
-    std::vector<std::vector<std::vector<float>>>& dqg_dt,
-    std::vector<std::vector<std::vector<float>>>& dqh_dt
+    const Field3D& qr,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& dqr_dt,
+    Field3D& dqs_dt,
+    Field3D& dqg_dt,
+    Field3D& dqh_dt
 ) 
 {
     // Iterate over all grid points and compute sedimentation
-    int NR = qr.size();
-    int NTH = qr[0].size();
-    int NZ = qr[0][0].size();
+    int NR = qr.size_r();
+    int NTH = qr.size_th();
+    int NZ = qr.size_z();
     const double dz = 100.0;
 
     // Iterate over all grid points and compute sedimentation
@@ -479,40 +487,44 @@ void ThompsonScheme::compute_sedimentation(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Rain sedimentation
-                if (qr[i][j][k] > 0.0f && k > 0)
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                if (qr_val > 0.0f && k > 0)
                 {
-                    float Vt = a_r_ * std::pow(std::max(qr[i][j][k], 1e-6f), b_r_);
-                    float sed_flux = Vt * qr[i][j][k];
+                    float Vt = a_r_ * std::pow(std::max(qr_val, 1e-6f), b_r_);
+                    float sed_flux = Vt * qr_val;
                     dqr_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqr_dt[i][j][k + 1] += sed_flux / dz;
                 }
 
                 // If the snow mixing ratio is greater than zero and the vertical level is greater than zero, compute the sedimentation rate
                 // Snow sedimentation
-                if (qs[i][j][k] > 0.0f && k > 0) 
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                if (qs_val > 0.0f && k > 0) 
                 {
-                    float Vt = a_s_ * std::pow(std::max(qs[i][j][k], 1e-6f), b_s_);
-                    float sed_flux = Vt * qs[i][j][k];
+                    float Vt = a_s_ * std::pow(std::max(qs_val, 1e-6f), b_s_);
+                    float sed_flux = Vt * qs_val;
                     dqs_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqs_dt[i][j][k + 1] += sed_flux / dz;
                 }
 
                 // If the graupel mixing ratio is greater than zero and the vertical level is greater than zero, compute the sedimentation rate
                 // Graupel sedimentation
-                if (qg[i][j][k] > 0.0f && k > 0) 
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                if (qg_val > 0.0f && k > 0) 
                 {
-                    float Vt = a_g_ * std::pow(std::max(qg[i][j][k], 1e-6f), b_g_);
-                    float sed_flux = Vt * qg[i][j][k];
+                    float Vt = a_g_ * std::pow(std::max(qg_val, 1e-6f), b_g_);
+                    float sed_flux = Vt * qg_val;
                     dqg_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqg_dt[i][j][k + 1] += sed_flux / dz;
                 }
 
                 // If the hail mixing ratio is greater than zero and the vertical level is greater than zero, compute the sedimentation rate
                 // Hail sedimentation
-                if (qh[i][j][k] > 0.0f && k > 0) 
+                float qh_val = static_cast<float>(qh[i][j][k]);
+                if (qh_val > 0.0f && k > 0) 
                 {
-                    float Vt = a_h_ * std::pow(std::max(qh[i][j][k], 1e-6f), b_h_);
-                    float sed_flux = Vt * qh[i][j][k];
+                    float Vt = a_h_ * std::pow(std::max(qh_val, 1e-6f), b_h_);
+                    float sed_flux = Vt * qh_val;
                     dqh_dt[i][j][k] -= sed_flux / dz;
                     if (k < NZ - 1) dqh_dt[i][j][k + 1] += sed_flux / dz;
                 }
@@ -526,22 +538,22 @@ Takes in the cloud water mixing ratio, rainwater mixing ratio, ice mixing ratio,
 graupel mixing ratio, hail mixing ratio, and the radar reflectivity field
 and computes the radar reflectivity for the Thompson scheme.*/
 void ThompsonScheme::compute_radar_reflectivity(
-    const std::vector<std::vector<std::vector<float>>>& qc,
-    const std::vector<std::vector<std::vector<float>>>& qr,
-    const std::vector<std::vector<std::vector<float>>>& qi,
-    const std::vector<std::vector<std::vector<float>>>& qs,
-    const std::vector<std::vector<std::vector<float>>>& qg,
-    const std::vector<std::vector<std::vector<float>>>& qh,
-    std::vector<std::vector<std::vector<float>>>& reflectivity_dbz
+    const Field3D& qc,
+    const Field3D& qr,
+    const Field3D& qi,
+    const Field3D& qs,
+    const Field3D& qg,
+    const Field3D& qh,
+    Field3D& reflectivity_dbz
 ) 
 {
     // Iterate over all grid points and compute radar reflectivity
-    int NR = qc.size();
+    int NR = qc.size_r();
     if (NR == 0) return;
-    int NTH = qc[0].size();
-    int NZ = qc[0][0].size();
+    int NTH = qc.size_th();
+    int NZ = qc.size_z();
 
-    reflectivity_dbz.assign(NR, std::vector<std::vector<float>>(NTH, std::vector<float>(NZ, 0.0f)));
+    reflectivity_dbz.resize(NR, NTH, NZ, 0.0f);
 
     // Thompson reflectivity constants
     const float K_qc = 0.1e-3f;
@@ -563,12 +575,12 @@ void ThompsonScheme::compute_radar_reflectivity(
             for (int k = 0; k < NZ; ++k) 
             {
                 // Get current values
-                float qc_val = qc[i][j][k];
-                float qr_val = qr[i][j][k];
-                float qi_val = qi[i][j][k];
-                float qs_val = qs[i][j][k];
-                float qg_val = qg[i][j][k];
-                float qh_val = qh[i][j][k];
+                float qc_val = static_cast<float>(qc[i][j][k]);
+                float qr_val = static_cast<float>(qr[i][j][k]);
+                float qi_val = static_cast<float>(qi[i][j][k]);
+                float qs_val = static_cast<float>(qs[i][j][k]);
+                float qg_val = static_cast<float>(qg[i][j][k]);
+                float qh_val = static_cast<float>(qh[i][j][k]);
 
                 float Z_linear = K_qc * std::pow(std::max(qc_val, 0.0f), alpha) +
                                 K_qr * std::pow(std::max(qr_val, 0.0f), alpha) +

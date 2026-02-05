@@ -1,17 +1,71 @@
 #!/usr/bin/env python3
 """
 3D Volume Renderer for Supercell Simulations using ModernGL and volume ray marching.
+
+This renderer uses the new modular engine internally while maintaining backward compatibility.
+All existing features, controls, and CLI interface remain unchanged.
 """
-import moderngl as mgl
-import moderngl_window as mglw
+# Conditional imports for OpenGL dependencies
+try:
+    import moderngl as mgl
+    import moderngl_window as mglw
+    import zarr
+    OPENGL_AVAILABLE = True
+except ImportError as e:
+    OPENGL_AVAILABLE = False
+    missing_module = str(e).split("'")[1] if "'" in str(e) else "unknown"
+    # Create dummy classes for type hints when imports fail
+    class mgl:
+        pass
+    class mglw:
+        class WindowConfig:
+            pass
+    class zarr:
+        pass
+
 import numpy as np
-import zarr
 from pathlib import Path
 import time
 import math
 from typing import Optional, Tuple
 
-class SupercellVolumeRenderer(mglw.WindowConfig):
+# Import new engine components for internal use
+ENGINE_AVAILABLE = False
+try:
+    # Try relative import first (when used as module)
+    try:
+        from .core.data_manager import DataManager
+        from .core.shader_manager import ShaderManager
+        from .core.camera import OrbitCamera
+        ENGINE_AVAILABLE = True
+    except (ImportError, ModuleNotFoundError):
+        # Fallback to absolute import (when run as script)
+        try:
+            import sys
+            from pathlib import Path
+            vis_path = Path(__file__).parent
+            if str(vis_path) not in sys.path:
+                sys.path.insert(0, str(vis_path))
+            from core.data_manager import DataManager
+            from core.shader_manager import ShaderManager
+            from core.camera import OrbitCamera
+            ENGINE_AVAILABLE = True
+        except (ImportError, ModuleNotFoundError):
+            # Engine components not available (e.g., missing dependencies)
+            ENGINE_AVAILABLE = False
+except Exception:
+    # Any other error - fallback to original implementation
+    ENGINE_AVAILABLE = False
+
+# Define base class conditionally
+if OPENGL_AVAILABLE:
+    _BaseClass = mglw.WindowConfig
+else:
+    # Dummy base class for help/imports to work
+    class _BaseClass:
+        pass
+
+class SupercellVolumeRenderer(_BaseClass):
     """
     3D volume renderer for supercell thunderstorm simulations.
     Uses volume ray marching to render atmospheric fields.
@@ -31,6 +85,19 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
         parser.add_argument('--speed', type=float, default=1.0, help='Animation speed multiplier')
         parser.add_argument('--camera-distance', type=float, default=50.0, help='Initial camera distance')
         parser.add_argument('--list-fields', action='store_true', help='List available fields and exit')
+    
+    def __init__(self, **kwargs):
+        # Check dependencies - will be caught by main() if help is requested
+        if not OPENGL_AVAILABLE:
+            print("ERROR: OpenGL dependencies not installed!")
+            print("Required packages: moderngl, moderngl-window, zarr")
+            print("Install with: pip install moderngl moderngl-window zarr")
+            print("\nFor a simple 2D animation without OpenGL, use:")
+            print("  python visualization/create_animation.py --input <data_path> --field theta --output animation.gif")
+            import sys
+            sys.exit(1)
+        
+        super().__init__(**kwargs)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -61,6 +128,20 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
         self.camera_angle = 0.0
         self.camera_height = 20.0
         self.camera_target = np.array([0.0, 0.0, 10.0])
+        
+        # Initialize camera system if available
+        if ENGINE_AVAILABLE:
+            try:
+                self._orbit_camera = OrbitCamera(
+                    distance=self.camera_distance,
+                    height=self.camera_height,
+                    angle=self.camera_angle,
+                    target=self.camera_target
+                )
+            except:
+                self._orbit_camera = None
+        else:
+            self._orbit_camera = None
 
         # Transfer function parameters
         self.opacity_scale = 0.5  # Increased default opacity
@@ -80,6 +161,77 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
 
     def list_available_fields(self):
         """List all available fields in the Zarr dataset and exit"""
+        # Use DataManager if available for source-of-truth alignment
+        if ENGINE_AVAILABLE:
+            try:
+                data_mgr = DataManager(str(self.zarr_path))
+                available_fields = data_mgr.list_available_fields()
+                
+                print(f"\nAvailable fields in {self.zarr_path}:")
+                print("=" * 50)
+                
+                # Categorize fields (same as original)
+                thermo_fields = []
+                moisture_fields = []
+                wind_fields = []
+                diagnostic_fields = []
+                other_fields = []
+                
+                for field_name in available_fields:
+                    try:
+                        field_data = data_mgr.get_all_timesteps(field_name)
+                        if field_data is not None:
+                            dims = f"{field_data.shape}"
+                        else:
+                            dims = "unknown"
+                        
+                        # Categorize
+                        if field_name in ['theta', 'theta_e', 'temperature']:
+                            thermo_fields.append(f"  {field_name:<20} {dims}")
+                        elif field_name in ['qv', 'qc', 'qr', 'qi', 'qs', 'qh', 'qg']:
+                            moisture_fields.append(f"  {field_name:<20} {dims}")
+                        elif field_name in ['u', 'v', 'w']:
+                            wind_fields.append(f"  {field_name:<20} {dims}")
+                        elif field_name in ['reflectivity_dbz', 'radar', 'buoyancy', 'helicity', 'srh', 'cape', 'cin']:
+                            diagnostic_fields.append(f"  {field_name:<20} {dims}")
+                        else:
+                            other_fields.append(f"  {field_name:<20} {dims}")
+                    except Exception as e:
+                        other_fields.append(f"  {field_name:<20} (error: {e})")
+                
+                # Print categorized
+                if thermo_fields:
+                    print("Thermodynamic fields:")
+                    for field in thermo_fields:
+                        print(field)
+                if moisture_fields:
+                    print("\nMoisture/Precipitation fields:")
+                    for field in moisture_fields:
+                        print(field)
+                if wind_fields:
+                    print("\nWind fields:")
+                    for field in wind_fields:
+                        print(field)
+                if diagnostic_fields:
+                    print("\nDiagnostic fields:")
+                    for field in diagnostic_fields:
+                        print(field)
+                if other_fields:
+                    print("\nOther fields:")
+                    for field in other_fields:
+                        print(field)
+                
+                print("\n" + "=" * 50)
+                print("Use --field FIELD_NAME to visualize a specific field")
+                print("Examples:")
+                print("  --field theta      # Potential temperature")
+                print("  --field qr         # Rain water mixing ratio")
+                print("  --field qv         # Water vapor mixing ratio")
+                return
+            except Exception as e:
+                print(f"Warning: DataManager field listing failed: {e}, using fallback")
+        
+        # Fallback to original implementation
         try:
             store = zarr.open(str(self.zarr_path), mode='r')
             available_fields = []
@@ -161,62 +313,104 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
 
     def load_zarr_data(self):
         """Load simulation data from Zarr store"""
-        if not self.zarr_path.exists():
-            raise FileNotFoundError(f"Zarr file not found: {self.zarr_path}")
-
-        self.store = zarr.open(str(self.zarr_path), mode='r')
-
-        # Check if data exists
-        if self.primary_field not in self.store:
-            available_fields = list(self.store.keys())
-            raise ValueError(f"Field '{self.primary_field}' not found. Available: {available_fields}")
-
-        # Load dimensions - handle different zarr structures
-        field_data = self.store[self.primary_field]
-
-        if hasattr(field_data, 'shape'):
-            # New structure: single 4D array (time, z, y, x)
-            self.nt, self.nz, self.ny, self.nx = field_data.shape
-            print(f"Loaded data: {self.nt} timesteps, {self.nx}x{self.ny}x{self.nz} grid (4D array)")
-        elif hasattr(field_data, 'keys'):
-            # Old structure: group with individual timestep arrays
-            timestep_keys = sorted(field_data.keys(), key=lambda x: int(x))
-            if not timestep_keys:
-                raise ValueError(f"No timesteps found in {self.primary_field}")
-
-            # Load first timestep to get dimensions
-            first_timestep = field_data[timestep_keys[0]]
-            self.nt = len(timestep_keys)
-            _, self.nz, self.ny, self.nx = first_timestep.shape
-            print(f"Loaded data: {self.nt} timesteps, {self.nx}x{self.ny}x{self.nz} grid (group structure)")
-        else:
-            raise ValueError(f"Unsupported zarr structure for {self.primary_field}")
-
-        # Load coordinate arrays if available
-        if 'x' in self.store:
-            self.x_coords = self.store['x'][:]
-            self.y_coords = self.store['y'][:]
-            z_coords_full = self.store['z'][:]
-
-            # Handle coordinate dimension mismatch
-            if len(z_coords_full) != self.nz:
-                print(f"Warning: z coordinate dimension mismatch. Data has {self.nz} levels, coords have {len(z_coords_full)} values.")
-                # Truncate to match data dimensions (simpler approach)
-                if len(z_coords_full) > self.nz:
-                    # Truncate to match data dimensions
-                    self.z_coords = z_coords_full[:self.nz]
+        # Use DataManager for source-of-truth alignment
+        use_fallback = False
+        if ENGINE_AVAILABLE:
+            try:
+                self.data_manager = DataManager(str(self.zarr_path))
+                self.store = self.data_manager.store if hasattr(self.data_manager, 'store') else zarr.open(str(self.zarr_path), mode='r')
+                
+                # Get dimensions from DataManager
+                self.nx, self.ny, self.nz = self.data_manager.get_grid_dims()
+                
+                # Get number of timesteps
+                all_timesteps = self.data_manager.get_all_timesteps(self.primary_field)
+                if all_timesteps is not None:
+                    self.nt = all_timesteps.shape[0]
                 else:
-                    # Pad with zeros if coords are too short (rare case)
-                    padding = np.zeros(self.nz - len(z_coords_full))
-                    self.z_coords = np.concatenate([z_coords_full, padding])
-                print(f"Adjusted z coordinates to {len(self.z_coords)} values")
-            else:
-                self.z_coords = z_coords_full
+                    # Fallback: count manually
+                    if self.primary_field in self.store:
+                        field_data = self.store[self.primary_field]
+                        if hasattr(field_data, 'shape'):
+                            self.nt = field_data.shape[0]
+                        else:
+                            self.nt = len(field_data.keys()) if hasattr(field_data, 'keys') else 1
+                    else:
+                        self.nt = 1
+                
+                # Get coordinates
+                coords = self.data_manager.get_coordinates()
+                self.x_coords = coords.get('x', np.linspace(-50, 50, self.nx))
+                self.y_coords = coords.get('y', np.linspace(-50, 50, self.ny))
+                self.z_coords = coords.get('z', np.linspace(0, 15, self.nz))
+                
+                print(f"Loaded data via DataManager: {self.nt} timesteps, {self.nx}x{self.ny}x{self.nz} grid")
+                print(f"\n[FIELD INFO] Primary field: '{self.primary_field}'")
+                print(f"  This is the main field being visualized. Secondary fields (qr, qv, u, v, w, etc.)")
+                print(f"  will be combined with the primary field for richer visualization.")
+                print(f"  To visualize a different field, use: --field <field_name>")
+                print(f"  Available fields: {', '.join(self.data_manager.list_available_fields())}")
+            except Exception as e:
+                print(f"Warning: Could not use DataManager, falling back to direct zarr access: {e}")
+                use_fallback = True
         else:
-            # Create default coordinates
-            self.x_coords = np.linspace(-50, 50, self.nx)
-            self.y_coords = np.linspace(-50, 50, self.ny)
-            self.z_coords = np.linspace(0, 15, self.nz)
+            use_fallback = True
+        
+        if use_fallback:
+            # Fallback to original implementation
+            if not self.zarr_path.exists():
+                raise FileNotFoundError(f"Zarr file not found: {self.zarr_path}")
+
+            self.store = zarr.open(str(self.zarr_path), mode='r')
+
+            # Check if data exists
+            if self.primary_field not in self.store:
+                available_fields = list(self.store.keys())
+                raise ValueError(f"Field '{self.primary_field}' not found. Available: {available_fields}")
+
+            # Load dimensions - handle different zarr structures
+            field_data = self.store[self.primary_field]
+
+            if hasattr(field_data, 'shape'):
+                # New structure: single 4D array (time, z, y, x)
+                self.nt, self.nz, self.ny, self.nx = field_data.shape
+                print(f"Loaded data: {self.nt} timesteps, {self.nx}x{self.ny}x{self.nz} grid (4D array)")
+            elif hasattr(field_data, 'keys'):
+                # Old structure: group with individual timestep arrays
+                timestep_keys = sorted(field_data.keys(), key=lambda x: int(x))
+                if not timestep_keys:
+                    raise ValueError(f"No timesteps found in {self.primary_field}")
+
+                # Load first timestep to get dimensions
+                first_timestep = field_data[timestep_keys[0]]
+                self.nt = len(timestep_keys)
+                _, self.nz, self.ny, self.nx = first_timestep.shape
+                print(f"Loaded data: {self.nt} timesteps, {self.nx}x{self.ny}x{self.nz} grid (group structure)")
+            else:
+                raise ValueError(f"Unsupported zarr structure for {self.primary_field}")
+
+            # Load coordinate arrays if available
+            if 'x' in self.store:
+                self.x_coords = self.store['x'][:]
+                self.y_coords = self.store['y'][:]
+                z_coords_full = self.store['z'][:]
+
+                # Handle coordinate dimension mismatch
+                if len(z_coords_full) != self.nz:
+                    print(f"Warning: z coordinate dimension mismatch. Data has {self.nz} levels, coords have {len(z_coords_full)} values.")
+                    if len(z_coords_full) > self.nz:
+                        self.z_coords = z_coords_full[:self.nz]
+                    else:
+                        padding = np.zeros(self.nz - len(z_coords_full))
+                        self.z_coords = np.concatenate([z_coords_full, padding])
+                    print(f"Adjusted z coordinates to {len(self.z_coords)} values")
+                else:
+                    self.z_coords = z_coords_full
+            else:
+                # Create default coordinates
+                self.x_coords = np.linspace(-50, 50, self.nx)
+                self.y_coords = np.linspace(-50, 50, self.ny)
+                self.z_coords = np.linspace(0, 15, self.nz)
 
         # Pre-load some data for performance
         self.cache_data()
@@ -230,6 +424,46 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
 
     def cache_data(self):
         """Cache frequently accessed data"""
+        # Use DataManager if available for source-of-truth alignment
+        if ENGINE_AVAILABLE and hasattr(self, 'data_manager'):
+            try:
+                # Load primary field
+                all_primary = self.data_manager.get_all_timesteps(self.primary_field)
+                if all_primary is not None:
+                    self.primary_data = all_primary
+                else:
+                    # Fallback to direct access
+                    primary_field_data = self.store[self.primary_field]
+                    if hasattr(primary_field_data, 'shape'):
+                        self.primary_data = primary_field_data[:]
+                    else:
+                        timestep_keys = sorted(primary_field_data.keys(), key=lambda x: int(x))
+                        timestep_data = [primary_field_data[key][:] for key in timestep_keys]
+                        self.primary_data = np.stack(timestep_data, axis=0)
+                
+                # Load secondary fields using DataManager's field discovery
+                available_fields = self.data_manager.list_available_fields()
+                self.secondary_fields = {}
+                for field_name in available_fields:
+                    if field_name != self.primary_field:
+                        try:
+                            field_all = self.data_manager.get_all_timesteps(field_name)
+                            if field_all is not None:
+                                self.secondary_fields[field_name] = field_all
+                                print(f"Loaded field: {field_name} {field_all.shape}")
+                        except Exception as e:
+                            print(f"Warning: Could not load field {field_name}: {e}")
+                            continue
+                
+                if self.secondary_fields:
+                    print(f"Loaded secondary fields: {', '.join(self.secondary_fields.keys())}")
+                else:
+                    print("No secondary fields found - visualization will use primary field only")
+                return
+            except Exception as e:
+                print(f"Warning: DataManager cache failed, using fallback: {e}")
+        
+        # Fallback to original implementation
         # Load primary field - handle different structures
         primary_field_data = self.store[self.primary_field]
         if hasattr(primary_field_data, 'shape'):
@@ -320,16 +554,42 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
         self.volume_texture.repeat_y = False
         self.volume_texture.repeat_z = False
 
-        # Load shaders
-        shader_dir = Path(__file__).parent / "shaders"
-        vertex_shader = self.load_shader_file(shader_dir / "volume.vert")
-        fragment_shader = self.load_shader_file(shader_dir / "volume.frag")
+        # Use ShaderManager if available
+        if ENGINE_AVAILABLE:
+            try:
+                shader_dir = Path(__file__).parent / "shaders"
+                self.shader_manager = ShaderManager(shader_dir, self.ctx)
+                self.volume_prog = self.shader_manager.load_shader("volume", "volume_color")
+                print("Loaded shaders via ShaderManager")
+            except Exception as e:
+                print(f"Warning: ShaderManager failed, using fallback: {e}")
+                # Fallback to original
+                shader_dir = Path(__file__).parent / "shaders"
+                vertex_shader = self.load_shader_file(shader_dir / "volume" / "volume.vert")
+                fragment_shader = self.load_shader_file(shader_dir / "volume" / "volume_color.frag")
+                self.volume_prog = self.ctx.program(
+                    vertex_shader=vertex_shader,
+                    fragment_shader=fragment_shader
+                )
+        else:
+            # Fallback to original implementation
+            shader_dir = Path(__file__).parent / "shaders"
+            # Try new location first, then fallback to old
+            vert_path = shader_dir / "volume" / "volume.vert"
+            frag_path = shader_dir / "volume" / "volume_color.frag"
+            if not vert_path.exists():
+                vert_path = shader_dir / "volume.vert"
+            if not frag_path.exists():
+                frag_path = shader_dir / "volume.frag"
+            
+            vertex_shader = self.load_shader_file(vert_path)
+            fragment_shader = self.load_shader_file(frag_path)
 
-        # Create shader program
-        self.volume_prog = self.ctx.program(
-            vertex_shader=vertex_shader,
-            fragment_shader=fragment_shader
-        )
+            # Create shader program
+            self.volume_prog = self.ctx.program(
+                vertex_shader=vertex_shader,
+                fragment_shader=fragment_shader
+            )
 
         # Create cube VAO for volume rendering
         self.cube_vao = self.create_cube_vao()
@@ -343,7 +603,14 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
     def load_shader_file(self, shader_path: Path) -> str:
         """Load shader source from file"""
         if shader_path.exists():
-            return shader_path.read_text()
+            source = shader_path.read_text()
+            # Resolve includes if using ShaderManager
+            if ENGINE_AVAILABLE and hasattr(self, 'shader_manager'):
+                try:
+                    return self.shader_manager._resolve_includes(source, shader_path)
+                except:
+                    pass
+            return source
         else:
             # Fallback to embedded shaders
             return self.get_embedded_shader(shader_path.name)
@@ -488,33 +755,97 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
     def create_transfer_function(self, timestep: int):
         """Create RGBA volume texture from physical fields"""
         # Get primary field data
-        primary = self.primary_data[timestep]
+        # DataManager returns (time, z, y, x), so [timestep] gives (z, y, x)
+        primary = self.primary_data[timestep].copy()
+        
+        # Verify shape matches expectations
+        if primary.shape != (self.nz, self.ny, self.nx):
+            print(f"Warning: Primary data shape {primary.shape} doesn't match expected (nz={self.nz}, ny={self.ny}, nx={self.nx})")
+            # Try to fix common issues
+            if primary.shape == (self.nx, self.ny, self.nz):
+                print("  Data appears to be (x, y, z), transposing to (z, y, x)...")
+                primary = np.transpose(primary, (2, 1, 0))
 
-        # Handle NaN values first
+        # Handle NaN and inf values
         nan_mask = np.isnan(primary)
-        if np.any(nan_mask):
-            print(f"Warning: timestep {timestep} has {np.sum(nan_mask)} NaN values")
-            # Replace NaN values with a reasonable default
-            primary = np.where(nan_mask, 300.0, primary)  # Use 300K as default temperature
+        inf_mask = np.isinf(primary)
+        invalid_mask = nan_mask | inf_mask
+        
+        if np.any(invalid_mask):
+            invalid_count = np.sum(invalid_mask)
+            print(f"Warning: timestep {timestep} has {invalid_count} invalid values (NaN/inf)")
+            # Replace invalid values with a reasonable default based on field type
+            if self.primary_field == 'theta':
+                default_value = 300.0  # K
+            elif self.primary_field in ['qr', 'qc', 'qv', 'qh', 'qg']:
+                default_value = 0.0
+            else:
+                default_value = 0.0
+            primary = np.where(invalid_mask, default_value, primary)
 
-        # Normalize primary field
-        primary_min, primary_max = np.nanmin(primary), np.nanmax(primary)
+        # Get valid range (excluding any remaining invalid values)
+        valid_data = primary[~np.isnan(primary) & ~np.isinf(primary)]
+        if len(valid_data) == 0:
+            print(f"Error: timestep {timestep} has no valid data")
+            # Return empty RGBA
+            return np.zeros((self.nx, self.ny, self.nz, 4), dtype=np.float32)
+        
+        primary_min, primary_max = valid_data.min(), valid_data.max()
 
         # Check for data corruption and apply field-specific normalization
         if self.primary_field == 'theta':
             # Theta should be reasonable temperature range (potential temperature)
-            if primary_max > 1000 or primary_min < 200:
+            # Handle extreme negative values (might be data format issue)
+            if primary_min < -1000 or primary_max > 1000 or not np.isfinite(primary_min) or not np.isfinite(primary_max):
                 print(f"Warning: timestep {timestep} has suspicious theta range: {primary_min:.1f} to {primary_max:.1f}")
-                # Clamp to reasonable temperature range for potential temperature
-                primary = np.clip(primary, 250, 500)
-                # Re-compute min/max after clamping
-                primary_min, primary_max = np.nanmin(primary), np.nanmax(primary)
+                
+                # If values are extremely negative, might need to add offset or use absolute value
+                if primary_min < -1000:
+                    print(f"  Detected extreme negative values. Checking if data needs offset correction...")
+                    # Try to find a reasonable offset (assume data should be around 300K)
+                    # If all values are negative, add offset to bring them into reasonable range
+                    if primary_max < 0:
+                        offset = 300.0 - primary_max  # Shift so max becomes ~300
+                        print(f"  Applying offset correction: +{offset:.1f} K")
+                        primary = primary + offset
+                        valid_data = primary[~np.isnan(primary) & ~np.isinf(primary)]
+                        if len(valid_data) > 0:
+                            primary_min, primary_max = valid_data.min(), valid_data.max()
+                            print(f"  After offset: range [{primary_min:.1f}, {primary_max:.1f}] K")
+                
+                # Don't clamp yet - first check if we have a valid range for normalization
+                # Use percentiles to handle outliers instead of hard clamping
+                valid_data = primary[~np.isnan(primary) & ~np.isinf(primary)]
+                if len(valid_data) > 0:
+                    # Use percentiles to get robust min/max (ignore extreme outliers)
+                    p1, p99 = np.percentile(valid_data, [1, 99])
+                    if p99 - p1 > 1.0:  # If we have reasonable spread
+                        # Use percentile range for normalization (more robust)
+                        primary_min, primary_max = p1, p99
+                        print(f"  Using percentile range (1-99%): [{primary_min:.1f}, {primary_max:.1f}] K")
+                    else:
+                        # If data is too compressed, try median ± std
+                        median = np.median(valid_data)
+                        std = np.std(valid_data)
+                        if std > 0:
+                            primary_min, primary_max = median - 3*std, median + 3*std
+                            print(f"  Using median±3σ range: [{primary_min:.1f}, {primary_max:.1f}] K")
+                        else:
+                            # Last resort: use actual min/max
+                            primary_min, primary_max = valid_data.min(), valid_data.max()
+                            print(f"  Using actual range: [{primary_min:.1f}, {primary_max:.1f}] K")
+                else:
+                    primary_min, primary_max = 300.0, 350.0  # Fallback range
+                    print(f"  Using fallback range: [{primary_min:.1f}, {primary_max:.1f}] K")
 
             # Standard linear normalization for temperature
-            if primary_max > primary_min:
+            if primary_max > primary_min and np.isfinite(primary_min) and np.isfinite(primary_max):
                 primary_norm = (primary - primary_min) / (primary_max - primary_min)
+                primary_norm = np.clip(primary_norm, 0.0, 1.0)
             else:
-                primary_norm = np.zeros_like(primary)
+                # Fallback: use reasonable default range
+                print(f"Warning: Invalid range for theta, using default normalization")
+                primary_norm = np.full_like(primary, 0.5, dtype=np.float32)
 
         elif self.primary_field == 'reflectivity_dbz':
             # Radar reflectivity should be reasonable dBZ range (-30 to 60+)
@@ -532,21 +863,100 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
             primary_norm = np.clip((primary - reflectivity_threshold) / (primary_max - reflectivity_threshold), 0.0, 1.0)
 
         else:
-            # Default linear normalization for other fields
-            if primary_max > primary_min:
-                primary_norm = (primary - primary_min) / (primary_max - primary_min)
-            else:
+            # Default linear normalization for other fields (qr, qv, qc, etc.)
+            # Handle case where field is all zeros (e.g., no rain at early timesteps)
+            if primary_max == primary_min == 0.0:
+                print(f"Warning: Field '{self.primary_field}' is all zeros at timestep {timestep}")
+                print(f"  This is normal for fields like 'qr' (rain) at early timesteps.")
+                print(f"  Visualization will use secondary fields (wind, theta, etc.) instead.")
+                # Set to zero - secondary fields will provide the visualization
                 primary_norm = np.zeros_like(primary)
+            elif primary_max > primary_min and np.isfinite(primary_min) and np.isfinite(primary_max):
+                primary_norm = (primary - primary_min) / (primary_max - primary_min)
+                # Clamp to [0, 1] to handle any remaining edge cases
+                primary_norm = np.clip(primary_norm, 0.0, 1.0)
+            else:
+                # Fallback: use a simple normalization if range is invalid
+                if np.isfinite(primary_max) and np.isfinite(primary_min):
+                    primary_norm = np.zeros_like(primary)
+                else:
+                    # If we still have inf/nan, use a default
+                    primary_norm = np.full_like(primary, 0.5)
+                    print(f"Warning: Using default normalization for timestep {timestep}")
 
         # Initialize RGBA channels
         r = primary_norm.copy()  # Red channel for primary field
+        
+        # If primary field is all zeros, that's okay - we'll use secondary fields
+        # But add a small signal to red channel based on secondary fields so something shows
+        if r.mean() == 0.0 and r.max() == 0.0:
+            # Primary field is truly zero (e.g., no rain yet)
+            # Use secondary fields to provide some red channel signal
+            if 'theta' in self.secondary_fields:
+                # Use theta as fallback for red channel
+                theta_data = self.secondary_fields['theta'][timestep]
+                theta_valid = theta_data[~np.isnan(theta_data) & ~np.isinf(theta_data)]
+                if len(theta_valid) > 0:
+                    theta_min, theta_max = theta_valid.min(), theta_valid.max()
+                    if theta_max > theta_min:
+                        theta_norm = np.clip((theta_data - theta_min) / (theta_max - theta_min), 0.0, 1.0)
+                        r = np.maximum(r, theta_norm * 0.3)  # Use 30% of theta for red channel
+                        print(f"  Using theta as fallback for red channel (primary field is zero)")
+        
         g = np.zeros_like(primary_norm)  # Green for secondary fields
         b = np.zeros_like(primary_norm)  # Blue for wind/turbulence
         a = np.zeros_like(primary_norm)  # Alpha for opacity
+        
+        # Add primary field to alpha channel for visibility
+        a = np.maximum(a, r * 0.3)  # Primary field contributes to opacity
 
+        # Ensure we have valid RGBA data
+        r = np.nan_to_num(r, nan=0.0, posinf=1.0, neginf=0.0)
+        g = np.nan_to_num(g, nan=0.0, posinf=1.0, neginf=0.0)
+        b = np.nan_to_num(b, nan=0.0, posinf=1.0, neginf=0.0)
+        a = np.nan_to_num(a, nan=0.0, posinf=1.0, neginf=0.0)
+        
+        # Clamp all channels to [0, 1]
+        r = np.clip(r, 0.0, 1.0)
+        g = np.clip(g, 0.0, 1.0)
+        b = np.clip(b, 0.0, 1.0)
+        a = np.clip(a, 0.0, 1.0)
+        
         # Debug: Check RGBA stats (only for first timestep)
         if timestep == self.valid_timesteps[0]:
-            print(f"RGBA stats: R:{r.mean():.3f}, G:{g.mean():.3f}, B:{b.mean():.3f}, A:{a.mean():.3f}")
+            print(f"\n[TRANSFER FUNCTION] Timestep {timestep} ({self.primary_field}):")
+            print(f"  Primary field range: [{primary_min:.2f}, {primary_max:.2f}]")
+            
+            # Warn if primary field is zero and suggest alternatives
+            if primary_max == 0.0 and self.primary_field in ['qr', 'qc', 'qh', 'qg']:
+                print(f"  ⚠️  Primary field '{self.primary_field}' is zero at this timestep (no precipitation yet)")
+                print(f"  💡 Try: --field theta (thermal structure) or --field reflectivity_dbz (radar)")
+                print(f"  💡 Or wait for later timesteps when precipitation forms")
+            
+            print(f"  RGBA stats: R:{r.mean():.3f}, G:{g.mean():.3f}, B:{b.mean():.3f}, A:{a.mean():.3f}")
+            print(f"  RGBA ranges: R:[{r.min():.3f}, {r.max():.3f}], A:[{a.min():.3f}, {a.max():.3f}]")
+            print(f"  Secondary fields used: {list(self.secondary_fields.keys())}")
+            
+            # Check which secondary fields actually contribute
+            if 'qr' in self.secondary_fields:
+                qr_data = self.secondary_fields['qr'][timestep]
+                if qr_data.max() > 0:
+                    print(f"    qr: range [{qr_data.min():.6f}, {qr_data.max():.6f}], mean={qr_data.mean():.6f}")
+            if 'qv' in self.secondary_fields:
+                qv_data = self.secondary_fields['qv'][timestep]
+                print(f"    qv: range [{qv_data.min():.6f}, {qv_data.max():.6f}], mean={qv_data.mean():.6f}")
+            
+            # Calculate wind speed (handling case where primary might be a wind component)
+            u_wind = primary if self.primary_field == 'u' else (self.secondary_fields.get('u', [None])[timestep] if 'u' in self.secondary_fields else None)
+            v_wind = primary if self.primary_field == 'v' else (self.secondary_fields.get('v', [None])[timestep] if 'v' in self.secondary_fields else None)
+            w_wind = primary if self.primary_field == 'w' else (self.secondary_fields.get('w', [None])[timestep] if 'w' in self.secondary_fields else None)
+            
+            if u_wind is not None and v_wind is not None and w_wind is not None:
+                wind_speed = np.sqrt(u_wind**2 + v_wind**2 + w_wind**2)
+                print(f"    wind: speed range [{wind_speed.min():.2f}, {wind_speed.max():.2f}] m/s")
+                if wind_speed.max() > 1000:
+                    print(f"    ⚠️  Very high wind speeds detected - data may need unit conversion")
+            print()
 
         # Add condensate fields (clouds, rain, ice, etc.)
         condensate_opacity = np.zeros_like(a)
@@ -593,14 +1003,42 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
             qv_norm = np.clip((qv - 0.005) / 0.015, 0.0, 1.0)  # Normalize to reasonable range
             b += qv_norm * 0.5  # Add to blue channel
 
-        # Wind field visualization (primary blue channel)
-        if 'u' in self.secondary_fields and 'v' in self.secondary_fields and 'w' in self.secondary_fields:
-            u = self.secondary_fields['u'][timestep]
-            v = self.secondary_fields['v'][timestep]
-            w = self.secondary_fields['w'][timestep]
-
-            wind_speed = np.sqrt(u**2 + v**2 + w**2)
-            wind_norm = np.clip(wind_speed / 50.0, 0.0, 1.0)  # Scale for typical storm winds
+        # Wind field visualization (blue channel)
+        # Handle case where primary field might be a wind component
+        u_data = None
+        v_data = None
+        w_data = None
+        
+        # Get wind components (may be primary or secondary)
+        if self.primary_field == 'u':
+            u_data = primary  # Use primary field
+            v_data = self.secondary_fields.get('v', [None])[timestep] if 'v' in self.secondary_fields else None
+            w_data = self.secondary_fields.get('w', [None])[timestep] if 'w' in self.secondary_fields else None
+        elif self.primary_field == 'v':
+            u_data = self.secondary_fields.get('u', [None])[timestep] if 'u' in self.secondary_fields else None
+            v_data = primary  # Use primary field
+            w_data = self.secondary_fields.get('w', [None])[timestep] if 'w' in self.secondary_fields else None
+        elif self.primary_field == 'w':
+            u_data = self.secondary_fields.get('u', [None])[timestep] if 'u' in self.secondary_fields else None
+            v_data = self.secondary_fields.get('v', [None])[timestep] if 'v' in self.secondary_fields else None
+            w_data = primary  # Use primary field
+        else:
+            # Primary is not a wind component, get all from secondary
+            if 'u' in self.secondary_fields and 'v' in self.secondary_fields and 'w' in self.secondary_fields:
+                u_data = self.secondary_fields['u'][timestep]
+                v_data = self.secondary_fields['v'][timestep]
+                w_data = self.secondary_fields['w'][timestep]
+        
+        # Calculate wind speed if we have all components
+        if u_data is not None and v_data is not None and w_data is not None:
+            wind_speed = np.sqrt(u_data**2 + v_data**2 + w_data**2)
+            # Handle extreme wind speeds (data might be in wrong units)
+            wind_max = np.nanpercentile(wind_speed, 99)  # Use 99th percentile to ignore outliers
+            if wind_max > 1000:  # Unrealistic wind speeds
+                print(f"  Warning: Very high wind speeds detected (max={wind_max:.1f} m/s). Data may need scaling.")
+                wind_norm = np.clip(wind_speed / wind_max, 0.0, 1.0)  # Normalize to max
+            else:
+                wind_norm = np.clip(wind_speed / 50.0, 0.0, 1.0)  # Scale for typical storm winds (50 m/s)
 
             b = np.maximum(b, wind_norm)  # Blue for wind intensity
 
@@ -611,10 +1049,25 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
         a = np.maximum(a, condensate_opacity)
 
         # Ensure minimum opacity for structure visibility
-        a = np.maximum(a, 0.1)  # Increased minimum opacity
+        # Use a gradient based on primary field intensity
+        min_opacity = 0.05 + r * 0.15  # Minimum 0.05, up to 0.2 based on primary field
+        a = np.maximum(a, min_opacity)
+        
+        # Additional fallback: if alpha is still too low everywhere, boost it
+        if a.max() < 0.1:
+            print(f"Warning: Alpha channel very low (max={a.max():.3f}), boosting visibility")
+            # Boost alpha based on any non-zero signal
+            signal_mask = (r > 0.01) | (g > 0.01) | (b > 0.01)
+            a = np.where(signal_mask, np.maximum(a, 0.2), a)
+            # Also ensure primary field contributes to alpha
+            a = np.maximum(a, r * 0.3)
 
         # Stack into RGBA
         rgba = np.stack([r, g, b, a], axis=-1)
+        
+        # Data is currently (z, y, x, 4) but texture expects (x, y, z, 4)
+        # Transpose from (z, y, x, 4) to (x, y, z, 4)
+        rgba = np.transpose(rgba, (2, 1, 0, 3))  # (z, y, x, 4) -> (x, y, z, 4)
 
         return rgba.astype(np.float32)
 
@@ -626,10 +1079,52 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
         else:
             # Fallback to on-demand computation if not precomputed
             rgba_data = self.create_transfer_function(timestep)
+        
+        # Verify data shape matches texture expectations
+        expected_shape = (self.nx, self.ny, self.nz, 4)
+        if rgba_data.shape != expected_shape:
+            print(f"ERROR: Data shape mismatch! Expected {expected_shape}, got {rgba_data.shape}")
+            print(f"  This will cause rendering issues. Data may need to be transposed.")
+            # Try to fix common shape issues
+            if rgba_data.shape[:3] == (self.nz, self.ny, self.nx):
+                print(f"  Attempting transpose from (nz, ny, nx) to (nx, ny, nz)...")
+                rgba_data = np.transpose(rgba_data, (2, 1, 0, 3))
+        
+        # Debug output: show what's being sent to GPU (only once, during first call)
+        if not hasattr(self, '_texture_debug_logged'):
+            r_mean = rgba_data[:, :, :, 0].mean()
+            g_mean = rgba_data[:, :, :, 1].mean()
+            b_mean = rgba_data[:, :, :, 2].mean()
+            a_mean = rgba_data[:, :, :, 3].mean()
+            a_max = rgba_data[:, :, :, 3].max()
+            a_min = rgba_data[:, :, :, 3].min()
+            non_zero_alpha = np.sum(rgba_data[:, :, :, 3] > 0.01)
+            total_voxels = rgba_data.shape[0] * rgba_data.shape[1] * rgba_data.shape[2]
+            
+            print(f"\n[GPU TEXTURE] First timestep preview (timestep {timestep}):")
+            print(f"  Shape: {rgba_data.shape} (expected: {expected_shape})")
+            print(f"  RGBA means: R={r_mean:.3f}, G={g_mean:.3f}, B={b_mean:.3f}, A={a_mean:.3f}")
+            print(f"  Alpha range: [{a_min:.3f}, {a_max:.3f}]")
+            print(f"  Non-zero alpha voxels: {non_zero_alpha}/{total_voxels} ({100*non_zero_alpha/total_voxels:.1f}%)")
+            
+            if r_mean < 0.01:
+                print(f"  WARNING: Red channel (primary field '{self.primary_field}') is nearly zero!")
+                print(f"  This suggests normalization failed. Theta values may need different handling.")
+            if a_max < 0.05:
+                print(f"  WARNING: Alpha values very low! Rendering may be invisible.")
+                print(f"  Try increasing opacity (UP arrow) or using preset 2 (press '2')")
+            
+            self._texture_debug_logged = True
+        
         self.volume_texture.write(rgba_data.tobytes())
 
     def create_view_matrix(self) -> np.ndarray:
         """Create view matrix for orbiting camera"""
+        # Use Camera system if available
+        if ENGINE_AVAILABLE and hasattr(self, '_orbit_camera'):
+            return self._orbit_camera.get_view_matrix()
+        
+        # Fallback to original implementation
         # Camera position (orbiting around storm)
         eye_x = self.camera_distance * math.cos(self.camera_angle)
         eye_y = self.camera_distance * math.sin(self.camera_angle)
@@ -643,6 +1138,11 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
 
     def create_projection_matrix(self) -> np.ndarray:
         """Create perspective projection matrix"""
+        # Use Camera system if available
+        if ENGINE_AVAILABLE and hasattr(self, '_orbit_camera'):
+            return self._orbit_camera.get_projection_matrix(self.wnd.size[0], self.wnd.size[1])
+        
+        # Fallback to original implementation
         fov = math.radians(45.0)
         aspect = self.wnd.size[0] / self.wnd.size[1]
         near = 0.1
@@ -690,14 +1190,36 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
         self.ctx.enable(mgl.BLEND)
         self.ctx.blend_func = mgl.SRC_ALPHA, mgl.ONE_MINUS_SRC_ALPHA
 
+        # Track previous frame to detect changes (only update texture when frame actually changes)
+        if not hasattr(self, '_prev_render_frame'):
+            self._prev_render_frame = -1
+        
         # Update animation
         if self.is_playing and self.valid_timesteps:
             frame_index = int(time * 30 * self.animation_speed) % len(self.valid_timesteps)
-            self.current_frame = self.valid_timesteps[frame_index]
-            self.update_volume_texture(self.current_frame)
+            new_frame = self.valid_timesteps[frame_index]
+            
+            # Only update texture if frame changed (avoid spam)
+            if new_frame != self.current_frame:
+                self.current_frame = new_frame
+                # Update texture with precomputed data (silently, no debug output)
+                if hasattr(self, 'precomputed_rgba') and self.current_frame in self.precomputed_rgba:
+                    rgba_data = self.precomputed_rgba[self.current_frame]
+                    self.volume_texture.write(rgba_data.tobytes())
+                else:
+                    # Fallback: compute on demand (but suppress debug output)
+                    rgba_data = self.create_transfer_function(self.current_frame)
+                    self.volume_texture.write(rgba_data.tobytes())
 
             # Slowly orbit camera
             self.camera_angle += frame_time * 0.2
+        elif self._prev_render_frame != self.current_frame:
+            # Frame changed but not playing - still update texture (silently)
+            if hasattr(self, 'precomputed_rgba') and self.current_frame in self.precomputed_rgba:
+                rgba_data = self.precomputed_rgba[self.current_frame]
+                self.volume_texture.write(rgba_data.tobytes())
+        
+        self._prev_render_frame = self.current_frame
 
         # Create transformation matrices
         view_matrix = self.create_view_matrix()
@@ -710,6 +1232,16 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
         self.volume_prog['opacityScale'].value = self.opacity_scale
         self.volume_prog['brightness'].value = self.brightness
         self.volume_texture.use(0)
+
+        # Debug: Print render info occasionally (first frame only)
+        if not hasattr(self, '_first_render_logged'):
+            print(f"\n[RENDER] Starting rendering:")
+            print(f"  Current frame: {self.current_frame}")
+            print(f"  Opacity scale: {self.opacity_scale}")
+            print(f"  Brightness: {self.brightness}")
+            print(f"  Texture bound: {self.volume_texture}")
+            print(f"  Shader program: {self.volume_prog}")
+            self._first_render_logged = True
 
         # Render volume
         self.cube_vao.render(mgl.TRIANGLES)
@@ -743,20 +1275,20 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
             elif key == self.wnd.keys.RIGHT:
                 self.brightness /= 1.1
                 print(f"Brightness: {self.brightness:.2f}")
-            # Number keys for presets
-            elif key == self.wnd.keys._1:
+            # Number keys for presets (use ord() for character codes)
+            elif key == ord('1'):
                 self.opacity_scale = 0.1
                 self.brightness = 1.0
                 print("Preset 1: Default settings")
-            elif key == self.wnd.keys._2:
+            elif key == ord('2'):
                 self.opacity_scale = 0.5
                 self.brightness = 2.0
                 print("Preset 2: High visibility")
-            elif key == self.wnd.keys._3:
+            elif key == ord('3'):
                 self.opacity_scale = 1.0
                 self.brightness = 3.0
                 print("Preset 3: Maximum visibility")
-            elif key == self.wnd.keys._4:
+            elif key == ord('4'):
                 self.opacity_scale = 0.01
                 self.brightness = 0.5
                 print("Preset 4: Low visibility (debug)")
@@ -777,10 +1309,81 @@ class SupercellVolumeRenderer(mglw.WindowConfig):
         self.camera_angle += dx * 0.01
         self.camera_height += dy * 0.1
         self.camera_height = np.clip(self.camera_height, 5.0, 100.0)
+        
+        # Update camera system if available
+        if ENGINE_AVAILABLE and hasattr(self, '_orbit_camera'):
+            self._orbit_camera.set_angle(self.camera_angle)
+            self._orbit_camera.set_height(self.camera_height)
 
 def main():
     """Main entry point"""
+    import sys
+    # Check for --list-fields before opening window
+    if '--list-fields' in sys.argv:
+        # Handle field listing without opening window
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--input', required=True)
+        parser.add_argument('--list-fields', action='store_true')
+        args, _ = parser.parse_known_args()
+        
+        # Use DataManager to list fields without OpenGL
+        try:
+            import sys
+            from pathlib import Path
+            vis_path = Path(__file__).parent
+            if str(vis_path) not in sys.path:
+                sys.path.insert(0, str(vis_path))
+            from core.data_manager import DataManager
+            data_mgr = DataManager(args.input)
+            fields = data_mgr.list_available_fields()
+            print("\nAvailable fields in dataset:")
+            print("=" * 50)
+            for field in sorted(fields):
+                print(f"  {field}")
+            print("\n" + "=" * 50)
+            print("Use --field FIELD_NAME to visualize a specific field as primary")
+            print("Examples:")
+            print("  --field theta      # Potential temperature (default)")
+            print("  --field qr          # Rain water mixing ratio")
+            print("  --field qv          # Water vapor mixing ratio")
+            print("  --field reflectivity_dbz  # Radar reflectivity")
+            print("\nNote: The renderer automatically combines ALL fields:")
+            print("  - Primary field (--field) → Red channel")
+            print("  - Condensate fields (qr, qc, etc.) → Green channel")
+            print("  - Wind fields (u, v, w) → Blue channel")
+            return 0
+        except Exception as e:
+            print(f"Error reading data: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
+    
+    # Check dependencies first
+    if not OPENGL_AVAILABLE:
+        # Try to show help if requested, otherwise show error
+        import sys
+        if '--help' in sys.argv or '-h' in sys.argv:
+            # Create a simple parser to show help
+            import argparse
+            parser = argparse.ArgumentParser(description="3D Volume Renderer for Supercell Simulations")
+            SupercellVolumeRenderer.add_arguments(parser)
+            parser.print_help()
+            print("\n" + "="*60)
+            print("NOTE: This script requires OpenGL dependencies:")
+            print("  pip install moderngl moderngl-window zarr")
+            print("\nFor 2D animation without OpenGL:")
+            print("  python visualization/create_animation.py --input <data> --field theta --output animation.gif")
+        else:
+            print("ERROR: OpenGL dependencies not installed!")
+            print("Required packages: moderngl, moderngl-window, zarr")
+            print("Install with: pip install moderngl moderngl-window zarr")
+            print("\nFor a simple 2D animation without OpenGL, use:")
+            print("  python visualization/create_animation.py --input <data_path> --field theta --output animation.gif")
+        return 1
+    
     mglw.run_window_config(SupercellVolumeRenderer)
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main() or 0)

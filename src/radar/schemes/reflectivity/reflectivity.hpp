@@ -63,10 +63,10 @@ private:
      * @param Ze_out Output reflectivity field (linear units)
      */
     void compute_species_reflectivity(
-        const std::vector<std::vector<std::vector<float>>>& q,
-        const std::vector<std::vector<std::vector<float>>>* Nt,
+        const Field3D& q,
+        const Field3D* Nt,
         const HydrometeorProps& props,
-        std::vector<std::vector<std::vector<float>>>& Ze_out);
+        Field3D& Ze_out);
 
     /**
      * @brief Compute PSD-moment reflectivity using number concentrations
@@ -78,10 +78,10 @@ private:
      * @param species_name Species name for diagnostics
      */
     void compute_moment_reflectivity(
-        const std::vector<std::vector<std::vector<float>>>& q,
-        const std::vector<std::vector<std::vector<float>>>* Nt,
+        const Field3D& q,
+        const Field3D* Nt,
         const HydrometeorProps& props,
-        std::vector<std::vector<std::vector<float>>>& Ze_out,
+        Field3D& Ze_out,
         const std::string& species_name);
 
     /**
