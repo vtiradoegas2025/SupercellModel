@@ -2,7 +2,7 @@
 
 **Last Updated:** February 5, 2026
 
-This document provides a comprehensive overview of the current state of the TornadoModel/SupercellModel project, including known faults, working components, and next steps. This file is gitignored for local development context.
+This document provides a comprehensive overview of the current state of the TornadoModel/SupercellModel project, including known faults, working components, and next steps. 
 
 ---
 
