@@ -1,37 +1,58 @@
 # SupercellModel
 
 [![C++](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#license)
 
-A high-performance atmospheric simulation framework for **supercell and tornadic storm research**, featuring a modular physics design (**C++17**) and a companion **3D visualization pipeline** (**Python + OpenGL**).
+A high-performance, research-grade atmospheric simulation framework for **supercell and tornadic storm research**. SupercellModel implements compressible, non-hydrostatic equations in cylindrical coordinates with a modular physics architecture (**C++17**) and an active **native Vulkan rendering path** for local analysis.
 
 > **Status:** Work in progress / research prototype. APIs, file formats, and results may change.
 
+See **[docs/STATUS.md](docs/STATUS.md)**
 ---
 
-## Quick Start
+## Project Goal (CM1-lite on Personal Hardware)
 
-```bash
-# Clone and build
-git clone https://github.com/vtiradoegas2025/SupercellModel.git
-cd SupercellModel && make
+SupercellModel is an attempt to build a **CM1-lite style research model** that can run on workstation/personal hardware while keeping the physics architecture modular and testable.
 
-# Run a test simulation
-./bin/tornado_sim --headless --config=configs/classic.yaml --duration=60
+This project is not trying to replace CM1; CM1 remains the reference-standard system. The goal here is a pragmatic subset with strong developer ergonomics and reproducible validation workflows.
 
-# Visualize results
-pip install -r requirements.txt
-python visualization/run_3d_pipeline.py --quick-start
-```
+### Why this codebase is C++/modern-tooling oriented
+
+Fortran remains strong for production atmospheric modeling, but this project emphasizes:
+- explicit memory-layout control for large 3D fields (`Field3D` flattened storage)
+- easier integration with modern profiling/testing/tooling workflows
+- modular factory-based scheme experimentation across physics components
+- direct native rendering path integration (`vulkan/`) for local analysis loops
+
+### Scope for this repo
+
+- Runtime simulation path: `bin/tornado_sim`
+- Native viewer path: `bin/vulkan_viewer`
+- Strict exported-field validation contract and guard tooling
+- Modular physics scheme comparison for storm-scale research
+
+### Non-goals (current)
+
+- Full CM1 diagnostic breadth parity in one release
+- Operational forecasting-grade completeness
+- Eliminating all scientific calibration work (terrain/chaos tuning is ongoing)
+
+### Current Coverage Snapshot (February 25, 2026)
+
+- CM1-style field contract: `99` fields tracked
+- Exported now: `50`
+- Backlog/not implemented: `49`
+- Required-now coverage: `20/20` exported
+- Validation gates currently used:
+  - `make test`
+  - `make test-backend-physics`
+  - `make test-soundings`
+
+For the current gap audit and roadmap, see [docs/STATUS.md](docs/STATUS.md).
 
 ---
 
-## What is SupercellModel?
-
-SupercellModel is a research-grade atmospheric simulation framework designed for studying severe convective storms. It implements the compressible, non-hydrostatic equations in cylindrical coordinates with a modular physics architecture that enables systematic comparison of parameterizations.
-
-### Key Features
+## Key Features
 
 #### Core Simulation Engine (C++17)
 - **Compressible Dynamics**: Full Euler equations without hydrostatic approximation
@@ -48,14 +69,14 @@ SupercellModel is a research-grade atmospheric simulation framework designed for
 - **Microphysics**: 4 schemes (Kessler warm-rain, Thompson, Lin, Milbrandt)
 - **Boundary Layer**: 3 schemes (YSU, MYNN, slab)
 - **Turbulence**: 2 schemes (Smagorinsky-Lilly, TKE prognostic)
-- **Radiation**: 2 schemes (Simple grey, RRTMG)
+- **Radiation**: 1 scheme implemented (`simple_grey`; RRTMG planned)
 - **Radar Operators**: Forward simulators for Z/Ze, V_r, Z_DR, K_DP, ρ_HV
 
-#### 3D Visualization Pipeline (Python + OpenGL)
+#### 3D Visualization (Native Vulkan)
+- **Vulkan Viewer (`vulkan/`)**: Native Vulkan renderer for direct NPY ingest from backend exports
 - **Volume Rendering**: GPU-accelerated ray marching through atmospheric volumes
 - **Coordinate Transformation**: Cylindrical simulation data → Cartesian visualization
-- **Interactive Viewer**: Real-time exploration with orbital camera controls
-- **Offline Rendering**: High-quality video production with FFmpeg
+- **Interactive Viewer**: Real-time exploration via native orbital camera controls
 
 ### Example Output
 Simulated classic supercell thunderstorm showing:
@@ -99,7 +120,8 @@ Where ρ₀ is base-state density, p' is perturbation pressure, τ is sub-grid s
 ```
 SupercellModel/
 ├── src/                    # Core simulation code (C++17)
-│   ├── dynamics/          # Compressible Euler solver
+│   ├── core/              # Runtime coordinators and main executable
+│   ├── dynamics/          # Dynamics schemes
 │   ├── microphysics/      # Cloud physics parameterizations
 │   ├── boundary_layer/    # Planetary boundary layer schemes
 │   ├── turbulence/        # Sub-grid turbulence closures
@@ -108,9 +130,8 @@ SupercellModel/
 │   └── numerics/         # Advection/diffusion/time-stepping
 ├── include/               # Public headers and API
 ├── configs/               # Pre-configured simulation setups
-├── visualization/         # 3D rendering pipeline (Python)
+├── vulkan/                # Native Vulkan renderer
 ├── docs/                  # Technical documentation
-├── tests/                 # Validation and integration tests
 ├── bin/                   # Build outputs
 └── data/                  # Sample data and exports
 ```
@@ -122,86 +143,37 @@ SupercellModel/
 ### System Requirements
 - **C++ Compiler**: C++17 compliant (clang++ ≥ 9.0, g++ ≥ 7.0)
 - **OpenMP**: Optional but recommended for multi-core performance (libomp on macOS via Homebrew)
-- **Python**: 3.10+ with scientific stack
-- **Graphics**: OpenGL 3.3+ compatible GPU (for visualization)
+- **Graphics**: Vulkan-capable GPU/driver stack (MoltenVK on macOS)
 - **Memory**: 8GB+ RAM recommended for production simulations
 - **CPU**: Multi-core processor recommended (4+ cores for optimal performance)
 
 ### Dependencies
-- **C++**: SFML 3.x (optional GUI), Standard Template Library, OpenMP (optional)
-- **Python**: numpy, zarr, moderngl, pillow, tqdm, ffmpeg
+- **C++**: Standard Template Library, OpenMP (optional)
+- **Vulkan path**: vulkan-loader, Vulkan headers, MoltenVK, GLFW, glslang
 
 ### Build & Install
 
-```bash
-# Clone repository
-git clone https://github.com/vtiradoegas2025/SupercellModel.git
-cd SupercellModel
-
-# Build simulation engine (with optimizations enabled)
-make
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Optional: Build with GUI support
-make GUI=1
-
-# Note: OpenMP is automatically detected and enabled if available
-# On macOS, install libomp via: brew install libomp
-```
+Build/run commands are consolidated in **Quick Start & Command Reference** near the bottom of this README.
+OpenMP is auto-detected; on macOS you can install `libomp` via `brew install libomp`.
 
 ---
 
-## Usage Examples
-
-### Basic Simulation Run
-
-```bash
-# Run classic supercell case
-./bin/tornado_sim --config=configs/classic.yaml \
-                  --duration=3600 \
-                  --write-every=30 \
-                  --outdir=data/supercell_run
-
-# Config file specifies:
-# - CAPE = 2500 J/kg, shear = 40 m/s
-# - Thompson microphysics, YSU PBL, Smagorinsky turbulence
-# - Domain: 256×128×128 grid (Δr = 500m, Δz = 100m)
-```
-
-### Interactive Visualization
-
-```bash
-# Launch 3D viewer
-python visualization/supercell_renderer.py \
-    --input data/supercell_run \
-    --field theta
-
-# Controls:
-# SPACE: play/pause, R: reset, W: wireframe toggle
-# Mouse: orbit camera, Up/Down: opacity, Left/Right: brightness
-```
-
-### Automated Pipeline
-
-```bash
-# Complete simulation + visualization workflow
-python visualization/run_3d_pipeline.py --all \
-    --config configs/classic.yaml \
-    --output supercell_showcase.mp4
-```
-
-### Configuration Examples
+## Example Configuration Snippets
 
 **Classic Supercell** (Weisman-Klemp):
 ```yaml
-microphysics: thompson
-boundary_layer: ysu
-turbulence: smagorinsky
-cape_jkg: 2500
-shear_ms: 40
-domain_km: 128
+microphysics:
+  scheme: thompson
+boundary_layer:
+  scheme: ysu
+turbulence:
+  scheme: smagorinsky
+  dt_sgs: 1.0
+  Cs: 0.18
+  Pr_t: 0.7
+  Sc_t: 0.7
+environment:
+  cape_target_jkg: 2500
 ```
 
 **High-Resolution Tornado Case**:
@@ -210,8 +182,10 @@ grid:
   nr: 512
   nth: 256
   nz: 256
-microphysics: milbrandt
-radar: full_suite
+microphysics:
+  scheme: milbrandt
+radiation:
+  scheme: simple_grey
 ```
 
 ---
@@ -221,10 +195,10 @@ radar: full_suite
 ### Microphysics Parameterizations
 | Scheme | Species | Features | Use Case |
 |--------|---------|----------|----------|
-| **Kessler** | q_v, q_c, q_r | Warm-rain, autoconversion | Idealized studies |
-| **Thompson** | q_v, q_c, q_r, q_i, q_s, q_g | Aerosol-aware, ice processes | Realistic storms |
-| **Lin** | q_v, q_c, q_r, q_i, q_s | Fixed ice properties | Mixed-phase research |
-| **Milbrandt-Yau** | q_v + 6 hydrometeors | Double-moment | Size distribution studies |
+| **Kessler** | q_v, q_c, q_r (+ q_g, q_h in this implementation) | Warm-rain core, extended mixed-phase pathways | Idealized studies |
+| **Thompson** | q_v, q_c, q_r, q_i, q_s, q_g, q_h (+ internal N_i) | Mixed-phase with internal ice-number evolution | Realistic storms |
+| **Lin** | q_v, q_c, q_r, q_i, q_s, q_g, q_h | Bulk mixed-phase with graupel/hail categories | Mixed-phase research |
+| **Milbrandt-Yau** | q_v, q_c, q_r, q_i, q_s, q_g, q_h + internal N_r/N_i/N_s/N_g/N_h | Double-moment style | Size distribution studies |
 
 ### Boundary Layer Schemes
 - **YSU**: Non-local mixing, explicit entrainment, counter-gradient fluxes
@@ -250,6 +224,9 @@ radar: full_suite
 - **Storm Structure**: Realistic supercell morphology vs. literature
 - **Radar Signatures**: Z-V_r relationships match theoretical expectations
 
+### Regression Tests
+Primary command workflows are consolidated in **Quick Start & Command Reference** below.
+
 ### Performance Benchmarks
 - **Small Test Grid** (64×64×32): ~10,000-15,000 time steps/hour (with optimizations)
 - **Production Grid** (256×128×128): ~100-150 time steps/hour (with optimizations)
@@ -262,8 +239,8 @@ radar: full_suite
   - Cache: Contiguous memory layout improves cache locality (1.5-3x speedup)
 
 ### Known Limitations
-- Terrain module currently excluded from build
-- Chaos/stochastic perturbations are placeholders
+- Terrain module is integrated, but broader physics validation/calibration is ongoing
+- Chaos/stochastic perturbations are integrated; ensemble calibration and tuning are ongoing
 - Some advanced radar operators in development
 - APIs and file formats may change
 
@@ -288,8 +265,55 @@ radar: full_suite
 - **[Terrain](src/terrain/README.md)** - Orographic effects
 
 ### Development & Testing
-- **[Validation Framework](tests/README.md)** - Physics and numerical checks
-- **[Visualization Guide](visualization/README.md)** - 3D rendering pipeline
+- **[Project Status](docs/STATUS.md)** - Active gap audit and current validation state
+- **[Vulkan Viewer Guide](vulkan/README.md)** - Native rendering path and runtime options
+
+---
+
+## Quick Start & Command Reference
+
+### Clone and Build
+
+```bash
+git clone https://github.com/vtiradoegas2025/SupercellModel.git
+cd SupercellModel
+make
+make vulkan
+```
+
+### Run Simulation
+
+```bash
+# Fast smoke run
+./bin/tornado_sim --headless --config=configs/classic.yaml --duration=60
+
+# Longer example run
+./bin/tornado_sim --config=configs/classic.yaml \
+                  --duration=3600 \
+                  --write-every=30 \
+                  --outdir=data/supercell_run
+```
+
+### Run Vulkan Viewer
+
+```bash
+# Vulkan bootstrap smoke check
+./bin/vulkan_viewer --dry-run
+
+# Windowed volume render
+./bin/vulkan_viewer --window-test --render-backend volume --input data/supercell_run --field theta
+```
+
+### Validation Commands
+
+```bash
+make test
+make test-guards
+make test-backend-physics
+make test-soundings
+make test-radiation-regression
+make test-terrain-regression
+```
 
 ---
 
@@ -318,8 +342,8 @@ SupercellModel welcomes contributions from atmospheric scientists and computatio
 ### Areas for Contribution
 - **New Physics Schemes**: Additional microphysics, PBL, or turbulence options
 - **Radar Operators**: Enhanced polarimetric variables or advanced sampling
-- **Terrain Effects**: Complete terrain integration and testing
-- **Stochastic Physics**: Full SPPT and ensemble capability
+- **Terrain Effects**: Terrain-science benchmarking and validation against reference cases
+- **Stochastic Physics**: Ensemble workflow expansion and perturbation calibration
 - **Performance**: GPU acceleration, parallelization improvements
 - **Visualization**: Enhanced rendering features or new field diagnostics
 
@@ -354,4 +378,4 @@ For complete scientific attribution, see **[foundationalScience.md](docs/foundat
 
 SupercellModel represents a synthesis of modern atmospheric modeling techniques with an emphasis on modularity, validation, and visualization. The framework is designed to serve as both a research tool and an educational resource for understanding severe convective storms.
 
-*Built with modern C++17 and scientific Python. Inspired by the atmospheric modeling community's commitment to reproducible, well-validated research.*
+*Built with modern C++17 and a Vulkan-first rendering path. Inspired by the atmospheric modeling community's commitment to reproducible, well-validated research.*

@@ -1,14 +1,22 @@
+/**
+ * @file none.cpp
+ * @brief Implementation for the terrain module.
+ *
+ * Provides executable logic for the terrain runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/terrain subsystem.
+ */
+
 #include "none.hpp"
 #include <iostream>
 
-/*This file contains the implementation of the none terrain scheme.
-It manages the initialization of the none terrain scheme and the building of the topography.*/
 
 NoneScheme::NoneScheme() {}
 
 
-/*This function initializes the none terrain scheme.
-Takes in the configuration and initializes the none terrain scheme.*/
+/**
+ * @brief Initializes the none terrain scheme.
+ */
 
 void NoneScheme::initialize(const TerrainConfig& cfg) 
 {
@@ -16,20 +24,18 @@ void NoneScheme::initialize(const TerrainConfig& cfg)
 }
 
 
-/*This function builds the topography.
-Takes in the configuration and the topography and builds the topography.*/
+/**
+ * @brief Builds the topography.
+ */
 void NoneScheme::build_topography(const TerrainConfig& cfg, Topography2D& topo) 
 {
     const int NR = topo.h.size();
     const int NTH = NR > 0 ? topo.h[0].size() : 0;
 
-    // Iterate over the rows and columns and set the heights to zero.
     for (int i = 0; i < NR; ++i) 
     {
-        // Iterate over the columns and set the heights to zero.
         for (int j = 0; j < NTH; ++j) 
         {
-            // Set the heights to zero.
             topo.h[i][j] = 0.0;
             if (!topo.hx.empty()) topo.hx[i][j] = 0.0;
             if (!topo.hy.empty()) topo.hy[i][j] = 0.0;
@@ -37,40 +43,35 @@ void NoneScheme::build_topography(const TerrainConfig& cfg, Topography2D& topo)
     }
 }
 
-/*This function builds the metrics.
-Takes in the configuration and the topography and the metrics and builds the metrics.*/
+/**
+ * @brief Builds the metrics.
+ */
 void NoneScheme::build_metrics(const TerrainConfig& cfg,
                               const Topography2D& topo,
                               TerrainMetrics3D& metrics,
                               TerrainDiagnostics* diag_opt) 
 {
-    const int NR = metrics.z.size();
-    const int NTH = NR > 0 ? metrics.z[0].size() : 0;
-    const int NZ = NTH > 0 ? metrics.z[0][0].size() : 0;
+    const int NR = metrics.z.size_r();
+    const int NTH = metrics.z.size_th();
+    const int NZ = metrics.z.size_z();
 
-    // Build zeta levels
     auto zeta_levels = topography::build_zeta_levels(NZ, cfg.ztop);
 
-    // Cartesian coordinates (z = ζ, J = 1, m_x = m_y = 0)
-    // Iterate over the rows, columns, and levels and build the metrics.
     for (int i = 0; i < NR; ++i) 
     {
-        // Iterate over the columns and build the metrics.
         for (int j = 0; j < NTH; ++j) 
         {
-            // Iterate over the levels and build the metrics.
             for (int k = 0; k < NZ; ++k) {
                 double zeta = zeta_levels[k];
-                metrics.z[i][j][k] = zeta;
-                metrics.J[i][j][k] = 1.0;
-                metrics.mx[i][j][k] = 0.0;
-                metrics.my[i][j][k] = 0.0;
-                metrics.zeta[i][j][k] = zeta;
+                metrics.z(i, j, k) = zeta;
+                metrics.J(i, j, k) = 1.0;
+                metrics.mx(i, j, k) = 0.0;
+                metrics.my(i, j, k) = 0.0;
+                metrics.zeta(i, j, k) = zeta;
             }
         }
     }
 
-    // If the diagnostics are requested, fill the diagnostics.
     if (diag_opt) 
     {
         diag_opt->max_height = 0.0;

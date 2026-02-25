@@ -1,55 +1,92 @@
-#include "factory.hpp"
+/**
+ * @file factory.cpp
+ * @brief Implementation for the chaos module.
+ *
+ * Provides executable logic for the chaos runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/chaos subsystem.
+ */
 
-/*This file contains the implementation of the factory function.
-This file contains the implementation of the create_chaos_scheme function.*/
+#include "factory.hpp"
+#include <algorithm>
+#include <cctype>
+
+namespace
+{
+std::string normalize_scheme_name(std::string scheme_name)
+{
+    std::transform(scheme_name.begin(), scheme_name.end(), scheme_name.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (scheme_name == "pbl" ||
+        scheme_name == "pbl_perturbation" ||
+        scheme_name == "pbl_perturbations" ||
+        scheme_name == "bl_perturbation" ||
+        scheme_name == "bl_perturbations" ||
+        scheme_name == "boundary_layer_perturbation" ||
+        scheme_name == "boundary_layer_perturbations")
+    {
+        return "boundary_layer";
+    }
+    if (scheme_name == "ic")
+    {
+        return "initial_conditions";
+    }
+    if (scheme_name == "full")
+    {
+        return "full_stochastic";
+    }
+    return scheme_name;
+}
+}
+
 namespace chaos 
 {
 
-// Factory function to create chaos schemes
 std::unique_ptr<ChaosScheme> create_chaos_scheme(const std::string& scheme_name) 
 {
-    // If the scheme name is none, return a none scheme.
-    if (scheme_name == "none") 
+    const std::string normalized_name = normalize_scheme_name(scheme_name);
+
+    if (normalized_name == "none") 
     {
         return std::make_unique<NoneScheme>();
     } 
 
-    // If the scheme name is initial_conditions, return an initial conditions scheme.
-    else if (scheme_name == "initial_conditions") 
+    else if (normalized_name == "initial_conditions") 
     {
         return std::make_unique<InitialConditionsScheme>();
     } 
 
-    // If the scheme name is boundary_layer, return a boundary layer scheme.
-    else if (scheme_name == "boundary_layer") 
+    else if (normalized_name == "boundary_layer") 
     {
         return std::make_unique<BoundaryLayerScheme>();
     } 
 
-    // If the scheme name is full_stochastic, return a full stochastic scheme.
-    else if (scheme_name == "full_stochastic") 
+    else if (normalized_name == "full_stochastic") 
     {
         return std::make_unique<FullStochasticScheme>();
     } 
 
-    // If the scheme name is unknown, throw an error.
     else 
     {
-        throw std::runtime_error("Unknown chaos scheme: " + scheme_name);
+        throw std::runtime_error("Unknown chaos scheme: " + scheme_name +
+                                 " (normalized: " + normalized_name + ")");
     }
 }
 
-} // namespace chaos
+}
 
-/*This function creates the chaos scheme.
-Takes in the scheme name and creates the chaos scheme. Global factory function (for external use)*/
+/**
+ * @brief Creates the chaos scheme.
+ */
 std::unique_ptr<chaos::ChaosScheme> create_chaos_scheme(const std::string& scheme_name) 
 {
     return chaos::create_chaos_scheme(scheme_name);
 }
 
-/*This function gets the available chaos schemes.
-Takes in the available chaos schemes and returns the available chaos schemes.*/
+/**
+ * @brief Gets the available chaos schemes.
+ */
 std::vector<std::string> get_available_chaos_schemes() 
 {
     return {"none", "initial_conditions", "boundary_layer", "full_stochastic"};

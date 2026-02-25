@@ -1,18 +1,27 @@
+/**
+ * @file eddy_viscosity.cpp
+ * @brief Implementation for the turbulence module.
+ *
+ * Provides executable logic for the turbulence runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/turbulence subsystem.
+ */
+
 #include "eddy_viscosity.hpp"
+#include "grid_metric_utils.hpp"
 #include <cmath>
 #include <algorithm>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-/*This file contains the implementation of the eddy viscosity.
-It manages the computation of the eddy viscosity.*/
 
 namespace eddy_viscosity 
 {
 
-/*This function computes the strain rate.
-Takes in the state, grid, and the row, column, and level and computes the strain rate.*/
+/**
+ * @brief Computes the strain rate.
+ */
 StrainRate compute_strain_rate_3d(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
@@ -21,118 +30,107 @@ StrainRate compute_strain_rate_3d(
 {
     StrainRate S;
 
-    // Get grid spacings
-    double dx = grid.dx;
-    double dy = grid.dy;
-    double dz_k = (k >= 0 && k < static_cast<int>(grid.dz.size())) ? grid.dz[k] : grid.dz[0];
+    const double dx = std::max(grid_metric::local_dx(grid, i, j, k), 1.0);
+    const double dy = std::max(grid_metric::local_dy(grid, i, j, k), 1.0);
+    const double dz_k = std::max(grid_metric::local_dz(grid, i, j, k, state.NZ), 1.0);
 
-    // Velocity gradients (centered differences where possible)
-    // du/dx
     double dudx;
     if (i > 0 && i < state.NR - 1) {
         dudx = ((*state.u)[i+1][j][k] - (*state.u)[i-1][j][k]) / (2.0 * dx);
     } else if (i == 0) {
         dudx = ((*state.u)[i+1][j][k] - (*state.u)[i][j][k]) / dx;
-    } else { // i == state.NR - 1
+    } else {
         dudx = ((*state.u)[i][j][k] - (*state.u)[i-1][j][k]) / dx;
     }
 
-    // du/dy
     double dudy;
     if (j > 0 && j < state.NTH - 1) {
         dudy = ((*state.u)[i][j+1][k] - (*state.u)[i][j-1][k]) / (2.0 * dy);
     } else if (j == 0) {
         dudy = ((*state.u)[i][j+1][k] - (*state.u)[i][j][k]) / dy;
-    } else { // j == state.NTH - 1
+    } else {
         dudy = ((*state.u)[i][j][k] - (*state.u)[i][j-1][k]) / dy;
     }
 
-    // dv/dx
     double dvdx;
     if (i > 0 && i < state.NR - 1) {
         dvdx = ((*state.v)[i+1][j][k] - (*state.v)[i-1][j][k]) / (2.0 * dx);
     } else if (i == 0) {
         dvdx = ((*state.v)[i+1][j][k] - (*state.v)[i][j][k]) / dx;
-    } else { // i == state.NR - 1
+    } else {
         dvdx = ((*state.v)[i][j][k] - (*state.v)[i-1][j][k]) / dx;
     }
 
-    // dw/dx
     double dwdx;
     if (i > 0 && i < state.NR - 1) {
         dwdx = ((*state.w)[i+1][j][k] - (*state.w)[i-1][j][k]) / (2.0 * dx);
     } else if (i == 0) {
         dwdx = ((*state.w)[i+1][j][k] - (*state.w)[i][j][k]) / dx;
-    } else { // i == state.NR - 1
+    } else {
         dwdx = ((*state.w)[i][j][k] - (*state.w)[i-1][j][k]) / dx;
     }
 
-    // Note: dudv was duplicate of dudy, removing it
 
-    // dv/dy
     double dvdy;
     if (j > 0 && j < state.NTH - 1) {
         dvdy = ((*state.v)[i][j+1][k] - (*state.v)[i][j-1][k]) / (2.0 * dy);
     } else if (j == 0) {
         dvdy = ((*state.v)[i][j+1][k] - (*state.v)[i][j][k]) / dy;
-    } else { // j == state.NTH - 1
+    } else {
         dvdy = ((*state.v)[i][j][k] - (*state.v)[i][j-1][k]) / dy;
     }
 
-    // dw/dy
     double dwdy;
     if (j > 0 && j < state.NTH - 1) {
         dwdy = ((*state.w)[i][j+1][k] - (*state.w)[i][j-1][k]) / (2.0 * dy);
     } else if (j == 0) {
         dwdy = ((*state.w)[i][j+1][k] - (*state.w)[i][j][k]) / dy;
-    } else { // j == state.NTH - 1
+    } else {
         dwdy = ((*state.w)[i][j][k] - (*state.w)[i][j-1][k]) / dy;
     }
 
-    // du/dz
     double dudz;
     if (k > 0 && k < state.NZ - 1) {
-        dudz = ((*state.u)[i][j][k+1] - (*state.u)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]);
+        const double denom = std::max(grid_metric::centered_dz_span(grid, i, j, k, state.NZ), 1.0);
+        dudz = ((*state.u)[i][j][k+1] - (*state.u)[i][j][k-1]) / denom;
     } else if (k == 0) {
         dudz = ((*state.u)[i][j][k+1] - (*state.u)[i][j][k]) / dz_k;
-    } else { // k == state.NZ - 1
+    } else {
         dudz = ((*state.u)[i][j][k] - (*state.u)[i][j][k-1]) / dz_k;
     }
 
-    // dv/dz
     double dvdz;
     if (k > 0 && k < state.NZ - 1) {
-        dvdz = ((*state.v)[i][j][k+1] - (*state.v)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]);
+        const double denom = std::max(grid_metric::centered_dz_span(grid, i, j, k, state.NZ), 1.0);
+        dvdz = ((*state.v)[i][j][k+1] - (*state.v)[i][j][k-1]) / denom;
     } else if (k == 0) {
         dvdz = ((*state.v)[i][j][k+1] - (*state.v)[i][j][k]) / dz_k;
-    } else { // k == state.NZ - 1
+    } else {
         dvdz = ((*state.v)[i][j][k] - (*state.v)[i][j][k-1]) / dz_k;
     }
 
-    // dw/dz
     double dwdz;
     if (k > 0 && k < state.NZ - 1) {
-        dwdz = ((*state.w)[i][j][k+1] - (*state.w)[i][j][k-1]) / (grid.z_int[k+1] - grid.z_int[k-1]);
+        const double denom = std::max(grid_metric::centered_dz_span(grid, i, j, k, state.NZ), 1.0);
+        dwdz = ((*state.w)[i][j][k+1] - (*state.w)[i][j][k-1]) / denom;
     } else if (k == 0) {
         dwdz = ((*state.w)[i][j][k+1] - (*state.w)[i][j][k]) / dz_k;
-    } else { // k == state.NZ - 1
+    } else {
         dwdz = ((*state.w)[i][j][k] - (*state.w)[i][j][k-1]) / dz_k;
     }
 
-    // Strain rate tensor components (symmetric)
-    S.S11 = dudx;           // du/dx
-    S.S12 = 0.5 * (dudy + dvdx);  // 0.5*(du/dy + dv/dx)
-    S.S13 = 0.5 * (dudz + dwdx);  // 0.5*(du/dz + dw/dx)
+    S.S11 = dudx;
+    S.S12 = 0.5 * (dudy + dvdx);
+    S.S13 = 0.5 * (dudz + dwdx);
 
-    S.S21 = S.S12;          // symmetric
-    S.S22 = dvdy;           // dv/dy
-    S.S23 = 0.5 * (dvdz + dwdy);  // 0.5*(dv/dz + dw/dy)
+    S.S21 = S.S12;
+    S.S22 = dvdy;
+    S.S23 = 0.5 * (dvdz + dwdy);
 
-    S.S31 = S.S13;          // symmetric
-    S.S32 = S.S23;          // symmetric
-    S.S33 = dwdz;           // dw/dz
+    S.S31 = S.S13;
+    S.S32 = S.S23;
+    S.S33 = dwdz;
 
-    // Strain rate magnitude: |S| = sqrt(2 * Sij * Sij)
     S.magnitude = std::sqrt(2.0 * (
         S.S11*S.S11 + S.S22*S.S22 + S.S33*S.S33 +
         2.0*(S.S12*S.S12 + S.S13*S.S13 + S.S23*S.S23)
@@ -141,38 +139,47 @@ StrainRate compute_strain_rate_3d(
     return S;
 }
 
-/*This function computes the filter width.
-Takes in the configuration, grid, and the row, column, and level and computes the filter width.*/
+/**
+ * @brief Computes the filter width.
+ */
 double compute_filter_width(
     const TurbulenceConfig& cfg,
     const GridMetrics& grid,
     int i, int j, int k
 ) 
 {
+    int nz_hint = static_cast<int>(grid.dz.size());
+    if (nz_hint <= 0 && grid.terrain_metrics != nullptr)
+    {
+        nz_hint = grid.terrain_metrics->z.size_z();
+    }
+    if (nz_hint <= 0)
+    {
+        nz_hint = std::max(k + 1, 1);
+    }
 
-    // If the filter width is "dx", compute the filter width.
+    const double dx_local = std::max(grid_metric::local_dx(grid, i, j, k), 1.0);
+    const double dy_local = std::max(grid_metric::local_dy(grid, i, j, k), 1.0);
+    const double dz_local = std::max(grid_metric::local_dz(grid, i, j, k, nz_hint), 1.0);
+
     if (cfg.filter_width == "dx") 
     {
-        // Simple horizontal grid spacing
-        return std::sqrt(grid.dx * grid.dy);
+        return std::sqrt(dx_local * dy_local);
     }
     
-    // If the filter width is "cubic_root", compute the filter width.
     else if (cfg.filter_width == "cubic_root") 
     {
-        // LES-style cubic root (default)
-        double dz_k = (k >= 0 && k < static_cast<int>(grid.dz.size())) ? grid.dz[k] : grid.dz[0];
-        return std::cbrt(grid.dx * grid.dy * dz_k);
+        return std::cbrt(dx_local * dy_local * dz_local);
     }
     else 
     {
-        // Default fallback
-        return std::cbrt(grid.dx * grid.dy * 100.0);  // assume 100m vertical spacing
+        return std::cbrt(dx_local * dy_local * dz_local);
     }
 }
 
-/*This function computes the Smagorinsky viscosity.
-Takes in the Smagorinsky constant, filter width, strain magnitude, and stability factor and computes the Smagorinsky viscosity.*/
+/**
+ * @brief Computes the Smagorinsky viscosity.
+ */
 
 double compute_smagorinsky_viscosity(
     double Cs,
@@ -181,18 +188,16 @@ double compute_smagorinsky_viscosity(
     double stability_factor
 ) 
 {
-    // Smagorinsky formula: nu_t = (Cs * Delta)^2 * |S|
     double nu_t = Cs * Cs * Delta * Delta * strain_mag;
 
-    // Apply stability correction
     nu_t *= stability_factor;
 
-    // Ensure non-negative
     return std::max(nu_t, 0.0);
 }
 
-/*This function computes the eddy diffusivities.
-Takes in the eddy viscosity, turbulent Prandtl numbers, and the eddy diffusivities and computes the eddy diffusivities.*/
+/**
+ * @brief Computes the eddy diffusivities.
+ */
 void compute_eddy_diffusivities(
     double nu_t,
     double Pr_t,
@@ -202,14 +207,16 @@ void compute_eddy_diffusivities(
     double& K_tke
 ) 
 {
-    // Eddy diffusivities from eddy viscosity and turbulent Prandtl numbers
-    K_theta = nu_t / Pr_t;      // temperature diffusivity
-    K_q = nu_t / Sc_t;          // moisture diffusivity
-    K_tke = nu_t / Pr_t;        // TKE diffusivity (same as temperature)
+    const double Pr_safe = std::max(std::abs(Pr_t), 1.0e-6);
+    const double Sc_safe = std::max(std::abs(Sc_t), 1.0e-6);
+    K_theta = nu_t / Pr_safe;
+    K_q = nu_t / Sc_safe;
+    K_tke = nu_t / Pr_safe;
 }
 
-/*This function computes the scalar diffusion tendency.
-Takes in the state, grid, the eddy diffusivities, and the scalar and computes the scalar diffusion tendency.*/
+/**
+ * @brief Computes the scalar diffusion tendency.
+ */
 double compute_scalar_diffusion_tendency(
     const TurbulenceStateView& state,
     const GridMetrics& grid,
@@ -219,16 +226,15 @@ double compute_scalar_diffusion_tendency(
     int var_index
 ) 
 {
-    // This is a simplified implementation - in practice, you'd need proper
-    // flux-divergence computation across the entire domain
 
-    // For now, return zero (implement proper diffusion in full scheme)
     return 0.0;
 }
 
-/*This function computes the momentum diffusion tendencies.
-Takes in the state, grid, the eddy viscosity, and the momentum and computes the momentum diffusion tendencies.*/
+/**
+ * @brief Computes the momentum diffusion tendencies.
+ */
 void compute_momentum_diffusion_tendencies(
+    const TurbulenceConfig& cfg,
     const TurbulenceStateView& state,
     const GridMetrics& grid,
     const Field3D& nu_t,
@@ -237,35 +243,73 @@ void compute_momentum_diffusion_tendencies(
     Field3D& dwdt_sgs
 ) 
 {
-    // Simplified momentum diffusion (would need proper implementation)
-    // For now, apply weak damping to prevent instability
+    const bool use_horizontal = cfg.mode != "vertical_only";
+    const bool use_vertical = cfg.mode != "horizontal_only";
 
-    // Iterate over the rows, columns, and levels and compute the momentum diffusion tendencies.        
     #pragma omp parallel for collapse(2)
-    for (int i = 0; i < state.NR; ++i) 
+    for (int i = 0; i < state.NR; ++i)
     {
-        // Iterate over the columns and compute the momentum diffusion tendencies.
         for (int j = 0; j < state.NTH; ++j)
         {
-            // Iterate over the levels and compute the momentum diffusion tendencies.
-            for (int k = 0; k < state.NZ; ++k) 
-            {
-                // Compute the local eddy viscosity.
-                double nu_local = static_cast<double>(nu_t[i][j][k]);
-                double rho_local = static_cast<double>((*state.rho)[i][j][k]);
+            int j_prev = (j - 1 + state.NTH) % state.NTH;
+            int j_next = (j + 1) % state.NTH;
 
-                // Simple damping: -nu * u / rho (simplified diffusion)
-                dudt_sgs[i][j][k] = -nu_local * static_cast<double>((*state.u)[i][j][k]) / rho_local;
-                dvdt_sgs[i][j][k] = -nu_local * static_cast<double>((*state.v)[i][j][k]) / rho_local;
-                dwdt_sgs[i][j][k] = -nu_local * static_cast<double>((*state.w)[i][j][k]) / rho_local;
+            for (int k = 0; k < state.NZ; ++k)
+            {
+                double nu_local = static_cast<double>(nu_t[i][j][k]);
+                if (nu_local <= 0.0)
+                {
+                    dudt_sgs[i][j][k] = 0.0f;
+                    dvdt_sgs[i][j][k] = 0.0f;
+                    dwdt_sgs[i][j][k] = 0.0f;
+                    continue;
+                }
+
+                const double dx = std::max(grid_metric::local_dx(grid, i, j, k), 1.0);
+                const double dy = std::max(grid_metric::local_dy(grid, i, j, k), 1.0);
+                const double dz_k = std::max(grid_metric::local_dz(grid, i, j, k, state.NZ), 1.0);
+
+                const bool needs_radial_neighbors = use_horizontal;
+                const bool needs_vertical_neighbors = use_vertical;
+                if ((needs_radial_neighbors && (i == 0 || i == state.NR - 1)) ||
+                    (needs_vertical_neighbors && (k == 0 || k == state.NZ - 1)))
+                {
+                    dudt_sgs[i][j][k] = 0.0f;
+                    dvdt_sgs[i][j][k] = 0.0f;
+                    dwdt_sgs[i][j][k] = 0.0f;
+                    continue;
+                }
+
+                auto laplacian = [&](const Field3D& field) {
+                    const double center = static_cast<double>(field[i][j][k]);
+                    const double d2_dx2 = use_horizontal
+                        ? (static_cast<double>(field[i + 1][j][k]) - 2.0 * center +
+                           static_cast<double>(field[i - 1][j][k])) / (dx * dx)
+                        : 0.0;
+                    const double d2_dy2 = use_horizontal
+                        ? (static_cast<double>(field[i][j_next][k]) - 2.0 * center +
+                           static_cast<double>(field[i][j_prev][k])) / (dy * dy)
+                        : 0.0;
+                    const double d2_dz2 = use_vertical
+                        ? (static_cast<double>(field[i][j][k + 1]) - 2.0 * center +
+                           static_cast<double>(field[i][j][k - 1])) / (dz_k * dz_k)
+                        : 0.0;
+                    return d2_dx2 + d2_dy2 + d2_dz2;
+                };
+
+                dudt_sgs[i][j][k] = static_cast<float>(nu_local * laplacian(*state.u));
+                dvdt_sgs[i][j][k] = static_cast<float>(nu_local * laplacian(*state.v));
+                dwdt_sgs[i][j][k] = static_cast<float>(nu_local * laplacian(*state.w));
             }
         }
     }
 }
 
-/*This function computes the scalar diffusion tendencies.
-Takes in the state, grid, the eddy diffusivities, and the scalar and computes the scalar diffusion tendencies.*/
+/**
+ * @brief Computes the scalar diffusion tendencies.
+ */
 void compute_scalar_diffusion_tendencies(
+    const TurbulenceConfig& cfg,
     const TurbulenceStateView& state,
     const GridMetrics& grid,
     const Field3D& K_field,
@@ -273,40 +317,73 @@ void compute_scalar_diffusion_tendencies(
     Field3D& dphi_dt_sgs
 ) 
 {
-    // Simplified scalar diffusion (would need proper implementation)
-    // Iterate over the rows, columns, and levels and compute the scalar diffusion tendencies.
-    #pragma omp parallel for collapse(2)
-    for (int i = 0; i < state.NR; ++i) 
-    {
-        // Iterate over the columns and compute the scalar diffusion tendencies.
-        for (int j = 0; j < state.NTH; ++j) 
-        {
-            // Iterate over the levels and compute the scalar diffusion tendencies.
-            for (int k = 0; k < state.NZ; ++k) 
-            {
-                // Compute the local eddy diffusivity.
-                double K_local = static_cast<double>(K_field[i][j][k]);
-                double phi_local = static_cast<double>(phi[i][j][k]);
+    const bool use_horizontal = cfg.mode != "vertical_only";
+    const bool use_vertical = cfg.mode != "horizontal_only";
 
-                // Simple damping: -K * phi (simplified diffusion)
-                dphi_dt_sgs[i][j][k] = -K_local * phi_local;
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < state.NR; ++i)
+    {
+        for (int j = 0; j < state.NTH; ++j)
+        {
+            int j_prev = (j - 1 + state.NTH) % state.NTH;
+            int j_next = (j + 1) % state.NTH;
+
+            for (int k = 0; k < state.NZ; ++k)
+            {
+                double K_local = static_cast<double>(K_field[i][j][k]);
+                if (K_local <= 0.0)
+                {
+                    dphi_dt_sgs[i][j][k] = 0.0f;
+                    continue;
+                }
+
+                const double dx = std::max(grid_metric::local_dx(grid, i, j, k), 1.0);
+                const double dy = std::max(grid_metric::local_dy(grid, i, j, k), 1.0);
+                const double dz_k = std::max(grid_metric::local_dz(grid, i, j, k, state.NZ), 1.0);
+
+                const bool needs_radial_neighbors = use_horizontal;
+                const bool needs_vertical_neighbors = use_vertical;
+                if ((needs_radial_neighbors && (i == 0 || i == state.NR - 1)) ||
+                    (needs_vertical_neighbors && (k == 0 || k == state.NZ - 1)))
+                {
+                    dphi_dt_sgs[i][j][k] = 0.0f;
+                    continue;
+                }
+
+                const double center = static_cast<double>(phi[i][j][k]);
+                const double d2_dx2 = use_horizontal
+                    ? (static_cast<double>(phi[i + 1][j][k]) - 2.0 * center +
+                       static_cast<double>(phi[i - 1][j][k])) / (dx * dx)
+                    : 0.0;
+                const double d2_dy2 = use_horizontal
+                    ? (static_cast<double>(phi[i][j_next][k]) - 2.0 * center +
+                       static_cast<double>(phi[i][j_prev][k])) / (dy * dy)
+                    : 0.0;
+                const double d2_dz2 = use_vertical
+                    ? (static_cast<double>(phi[i][j][k + 1]) - 2.0 * center +
+                       static_cast<double>(phi[i][j][k - 1])) / (dz_k * dz_k)
+                    : 0.0;
+
+                dphi_dt_sgs[i][j][k] = static_cast<float>(K_local * (d2_dx2 + d2_dy2 + d2_dz2));
             }
         }
     }
 }
 
+/**
+ * @brief Applies Richardson-number stability correction to SGS coefficients.
+ */
 double stability_correction_ri(double Ri, double Ri_crit) {
-    // Reduce mixing in stable stratification
     if (Ri > 0.0) {
         return std::max(0.1, 1.0 - Ri / Ri_crit);
     } else {
-        // Slightly enhance mixing in unstable conditions
         return 1.0 - 0.5 * Ri;
     }
 }
 
-/*This function computes the TKE mixing length.
-Takes in the filter width, TKE, Brunt-Väisälä frequency, and the stability factor and computes the TKE mixing length.*/
+/**
+ * @brief Computes the TKE mixing length.
+ */
 double compute_tke_mixing_length(
     double Delta,
     double e,
@@ -314,45 +391,63 @@ double compute_tke_mixing_length(
     double c_l
 ) 
 {
-    // Stability-limited mixing length
-    double l_grid = Delta;  // grid-based limit
-    double l_stability = (N > 1e-6) ? c_l * std::sqrt(e) / N : l_grid;
+    const double l_grid = std::max(Delta, 1.0);
+    const double e_safe = std::max(e, 0.0);
+    double l_stability = (N > 1e-6) ? c_l * std::sqrt(e_safe) / N : l_grid;
 
-    return std::min(l_grid, l_stability);
+    return std::max(1.0e-3, std::min(l_grid, l_stability));
 }
 
-/*This function computes the Brunt-Väisälä frequency.
-Takes in the state, and the row, column, and level and computes the Brunt-Väisälä frequency.*/
+/**
+ * @brief Computes the Brunt-Väisälä frequency.
+ */
+double compute_brunt_vaisala_frequency(
+    const TurbulenceStateView& state,
+    const GridMetrics& grid,
+    int i, int j, int k
+)
+{
+    if (!state.theta || k < 0 || k >= state.NZ - 1)
+    {
+        return 0.0;
+    }
+
+    const double theta_k = static_cast<double>((*state.theta)[i][j][k]);
+    const double theta_kp1 = static_cast<double>((*state.theta)[i][j][k + 1]);
+    if (!std::isfinite(theta_k) || !std::isfinite(theta_kp1) || theta_k <= 1.0e-6)
+    {
+        return 0.0;
+    }
+
+    const int nz_hint = std::max(state.NZ, 1);
+    const double dz_local = std::max(grid_metric::local_dz(grid, i, j, k, nz_hint), 1.0);
+    const double dtheta_dz = (theta_kp1 - theta_k) / dz_local;
+
+    const double N2 = (turbulence_constants::g / theta_k) * dtheta_dz;
+    return (N2 > 0.0) ? std::sqrt(N2) : 0.0;
+}
+
 double compute_brunt_vaisala_frequency(
     const TurbulenceStateView& state,
     int i, int j, int k
 )
 {
-    // If the theta is not set or the level is greater than the number of levels, return zero.
-    if (!state.theta || k >= state.NZ - 1) return 0.0;
-
-    // Get the theta at the current level.
-    double theta_k = static_cast<double>((*state.theta)[i][j][k]);
-    // Get the theta at the next level.
-    double theta_kp1 = static_cast<double>((*state.theta)[i][j][k+1]);
-
-    double dtheta_dz = (theta_kp1 - theta_k) / 100.0;  // assume 100m layer
-
-    // Brunt-Väisälä frequency: N² = (g/θ) * dθ/dz
-    double N2 = (turbulence_constants::g / theta_k) * dtheta_dz;
-
-    return (N2 > 0.0) ? std::sqrt(N2) : 0.0;
+    GridMetrics legacy_grid;
+    legacy_grid.dx = 1000.0;
+    legacy_grid.dy = 1000.0;
+    legacy_grid.dz.assign(static_cast<std::size_t>(std::max(state.NZ, 1)), 100.0);
+    return compute_brunt_vaisala_frequency(state, legacy_grid, i, j, k);
 }
 
-/*This function applies the positivity limits.
-Takes in the field, minimum value, and maximum value and applies the positivity limits.*/
+/**
+ * @brief Applies the positivity limits.
+ */
 void apply_positivity_limits(
     Field3D& field,
     double min_value,
     double max_value
 ) 
 {
-    // Iterate over all grid points and apply the positivity limits
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < field.size_r(); ++i) 
     {
@@ -360,24 +455,31 @@ void apply_positivity_limits(
         {
             for (int k = 0; k < field.size_z(); ++k) 
             {
-                field[i][j][k] = std::max(static_cast<float>(min_value),
-                      std::min(static_cast<float>(max_value), static_cast<float>(field[i][j][k])));
+                const float old_value = static_cast<float>(field[i][j][k]);
+                float new_value = old_value;
+                if (!std::isfinite(static_cast<double>(new_value)))
+                {
+                    new_value = static_cast<float>(min_value);
+                }
+                new_value = std::max(static_cast<float>(min_value),
+                    std::min(static_cast<float>(max_value), new_value));
+                field[i][j][k] = new_value;
             }
         }
     }
 }
 
-/*This function initializes the 3D field.
-Takes in the field, number of rows, number of columns, number of levels, and the value and initializes the 3D field.*/
+/**
+ * @brief Initializes the 3D field.
+ */
 void initialize_3d_field(
     std::vector<std::vector<std::vector<float>>>& field,
     int NR, int NTH, int NZ,
     float value
 ) 
 {
-    // Assign the field.
     field.assign(NR, std::vector<std::vector<float>>(
                 NTH, std::vector<float>(NZ, value)));
 }
 
-} // namespace eddy_viscosity
+}

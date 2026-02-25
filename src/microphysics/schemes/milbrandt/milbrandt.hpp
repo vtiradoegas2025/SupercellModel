@@ -1,70 +1,67 @@
+/**
+ * @file milbrandt.hpp
+ * @brief Declarations for the microphysics module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the microphysics runtime and scheme implementations.
+ * This file is part of the src/microphysics subsystem.
+ */
+
 #pragma once
-#include "../../base/thermodynamics.hpp"
+#include "microphysics/base/thermodynamics.hpp"
 #include "microphysics_base.hpp"
 #include "field3d.hpp"
 
-/*This header file contains the declaration of the MilbrandtScheme class.
-This class implements the Milbrandt scheme.
-It is a subclass of the MicrophysicsScheme class.
-It implements the compute_tendencies method.
-It implements the compute_radar_reflectivity method.
-*/
 
+/**
+ * @brief Multi-moment Milbrandt-Yau style bulk microphysics scheme.
+ */
 class MilbrandtScheme : public MicrophysicsScheme 
 {
 private:
-    // Milbrandt-Yau scheme parameters (Milbrandt & Yau 2005)
-    double qc0_;        // autoconversion threshold (kg/kg)
-    double c_auto_;     // autoconversion rate (s⁻¹)
+    double qc0_;
+    double c_auto_;
 
-    // PSD parameters (fixed shape parameters)
-    double alpha_r_;    // rain shape parameter
-    double alpha_i_;    // cloud ice shape parameter
-    double alpha_s_;    // snow shape parameter
-    double alpha_g_;    // graupel shape parameter
-    double alpha_h_;    // hail shape parameter
+    double alpha_r_;
+    double alpha_i_;
+    double alpha_s_;
+    double alpha_g_;
+    double alpha_h_;
 
-    // Mass-diameter relationships: m(D) = c_x * D^{d_x}
-    double c_r_, d_r_;  // rain
-    double c_i_, d_i_;  // cloud ice
-    double c_s_, d_s_;  // snow
-    double c_g_, d_g_;  // graupel
-    double c_h_, d_h_;  // hail
+    double c_r_, d_r_;
+    double c_i_, d_i_;
+    double c_s_, d_s_;
+    double c_g_, d_g_;
+    double c_h_, d_h_;
 
-    // Terminal velocity parameters: Vt(D) = a_x * D^{b_x}
-    double a_r_, b_r_;  // rain
-    double a_i_, b_i_;  // cloud ice
-    double a_s_, b_s_;  // snow
-    double a_g_, b_g_;  // graupel
-    double a_h_, b_h_;  // hail
+    double a_r_, b_r_;
+    double a_i_, b_i_;
+    double a_s_, b_s_;
+    double a_g_, b_g_;
+    double a_h_, b_h_;
 
-    // Triple-moment option (predict Z for graupel/hail)
     bool triple_moment_;
-    bool hail_processes_;  // include hail category
+    bool hail_processes_;
 
-    // Prognostic arrays for number concentrations and reflectivity
-    Field3D Nr_;  // rain number (m⁻³)
-    Field3D Ni_;  // ice number (m⁻³)
-    Field3D Ns_;  // snow number (m⁻³)
-    Field3D Ng_;  // graupel number (m⁻³)
-    Field3D Nh_;  // hail number (m⁻³)
+    Field3D Nr_;
+    Field3D Ni_;
+    Field3D Ns_;
+    Field3D Ng_;
+    Field3D Nh_;
 
-    Field3D Zr_;  // rain reflectivity (mm⁶/m³)
-    Field3D Zi_;  // ice reflectivity (mm⁶/m³)
-    Field3D Zs_;  // snow reflectivity (mm⁶/m³)
-    Field3D Zg_;  // graupel reflectivity (mm⁶/m³)
-    Field3D Zh_;  // hail reflectivity (mm⁶/m³)
+    Field3D Zr_;
+    Field3D Zi_;
+    Field3D Zs_;
+    Field3D Zg_;
+    Field3D Zh_;
 
-    // Tendency arrays
     Field3D dNr_dt_, dNi_dt_, dNs_dt_, dNg_dt_, dNh_dt_;
     Field3D dZr_dt_, dZi_dt_, dZs_dt_, dZg_dt_, dZh_dt_;
 
 public:
-    /*This constructor initializes the Milbrandt scheme with default parameters.
-    Takes in the autoconversion threshold, autoconversion rate, alpha parameters for the rain, ice, snow, graupel, and hail,
-    c parameters for the rain, ice, snow, graupel, and hail, d parameters for the rain, ice, snow, graupel, and hail,
-    a parameters for the rain, ice, snow, graupel, and hail, b parameters for the rain, ice, snow, graupel, and hail,
-    triple moment flag, and hail processes flag and initializes the Milbrandt scheme with the default parameters.*/
+    /**
+ * @brief Initializes the Milbrandt scheme with default parameters.
+ */
     MilbrandtScheme(
         double qc0 = 1.0e-3,
         double c_auto = 1.0e-3,
@@ -84,10 +81,9 @@ public:
         bool hail_processes = true
     );
 
-    /*This function computes the tendencies for the Milbrandt scheme.
-    Takes in the pressure, potential temperature, vapor mixing ratio, cloud water mixing ratio, 
-    rainwater mixing ratio, ice mixing ratio, snow mixing ratio, graupel mixing ratio, hail mixing ratio,
-    and the time step and computes the tendencies for the Milbrandt scheme.*/
+    /**
+ * @brief Computes the tendencies for the Milbrandt scheme.
+ */
     void compute_tendencies(
         const Field3D& p,
         const Field3D& theta,
@@ -109,10 +105,9 @@ public:
         Field3D& dqh_dt
     ) override;
 
-    /*This function computes the radar reflectivity for the Milbrandt scheme.
-    Takes in the cloud water mixing ratio, rainwater mixing ratio, ice mixing ratio, 
-    snow mixing ratio, graupel mixing ratio, hail mixing ratio, and the radar reflectivity 
-    fieldand computes the radar reflectivity for the Milbrandt scheme.*/
+    /**
+ * @brief Computes the radar reflectivity for the Milbrandt scheme.
+ */
     void compute_radar_reflectivity(
         const Field3D& qc,
         const Field3D& qr,
@@ -123,45 +118,86 @@ public:
         Field3D& reflectivity_dbz
     ) override;
 
-    /*This function returns the name of the Milbrandt scheme.
-    Returns the name of the Milbrandt scheme.*/
+/**
+ * @brief Returns the name of the Milbrandt scheme.
+ */
     std::string get_scheme_name() const override { return "milbrandt"; }
     int get_num_prognostic_vars() const override 
     {
-        int vars = 7; // qv, qc, qr, qi, qs, qg, qh
-        vars += 5;    // Nr, Ni, Ns, Ng, Nh
-        if (triple_moment_) vars += 5; // Zr, Zi, Zs, Zg, Zh
+        int vars = 7;
+        vars += 5;
+        if (triple_moment_) vars += 5;
         return vars;
     }
 
-    /*This function returns the number of prognostic variables for the Milbrandt scheme.
-    It is a subclass of the MicrophysicsScheme class.
-    It implements the get_num_prognostic_vars method.
-    */
+/**
+ * @brief Returns the number of prognostic variables for the Milbrandt scheme.
+ */
 private:
-    // PSD and moment calculation functions
+    /**
+     * @brief Computes generalized-gamma slope parameter for a species.
+     */
     double calculate_lambda(double q, double Nt, double alpha, double c, double d);
-    double calculate_N0(double Nt, double alpha, double lambda);
-    double calculate_moment(double q, double Nt, double alpha, double c, double d, int moment_order);
-    double calculate_reflectivity(double q, double Nt, double alpha, double c, double d);
 
-    // Process rate calculations
+    /**
+     * @brief Computes intercept parameter from moments and slope.
+     */
+    double calculate_N0(double Nt, double alpha, double lambda);
+
+    /**
+     * @brief Computes requested distribution moment order.
+     */
+    double calculate_moment(double q, double Nt, double alpha, double c, double d, int moment_order);
+
+    /**
+     * @brief Computes linear reflectivity contribution from moments.
+     */
+    double calculate_reflectivity(double q, double Nt, double alpha, double c, double d);
+    
+    /**
+     * @brief Computes warm-rain autoconversion source term.
+     */
     double autoconversion_rate(double qc, double rho);
+
+    /**
+     * @brief Computes accretion transfer rate between two species.
+     */
     double accretion_rate(double q1, double q2, double Nt1, double Nt2, double alpha1, double alpha2,
                          double c1, double d1, double c2, double d2, double rho);
-    double sedimentation_rate(double q, double Nt, double alpha, double c, double d, int dz);
 
-    // Collection efficiency calculations
+    /**
+     * @brief Computes sedimentation tendency from terminal fall speed.
+     */
+    double sedimentation_rate(
+        double q,
+        double Nt,
+        double alpha,
+        double c,
+        double d,
+        double a_term,
+        double b_term,
+        double dz
+    );
+
+    /**
+     * @brief Computes rain self-collection tendency on number concentration.
+     */
     double rain_selfcollection_rate(double Nr, double rho);
+
+    /**
+     * @brief Computes ice collection efficiency for pairwise interactions.
+     */
     double ice_collection_efficiency(double T_celsius, double D1, double D2);
 
-    // Helper functions for microphysical processes
+
+    /**
+     * @brief Allocates and seeds prognostic number-concentration fields.
+     */
     void initialize_prognostic_fields(int NR, int NTH, int NZ);
 
-    /*This function computes the warm rain processes for the Milbrandt scheme.
-    Takes in the temperature, pressure, air density, vapor mixing ratio, cloud water mixing ratio, 
-    rainwater mixing ratio, and the tendencies for the cloud water, rainwater, and vapor mixing ratios
-    and computes the warm rain processes for the Milbrandt scheme.*/
+/**
+ * @brief Computes the warm rain processes for the Milbrandt scheme.
+ */
     void compute_warm_rain_processes(
         const Field3D& temperature,
         const Field3D& p,
@@ -176,11 +212,9 @@ private:
         Field3D& dNr_dt
     );
 
-    /*This function computes the ice processes for the Milbrandt scheme.
-    Takes in the temperature, pressure, air density, vapor mixing ratio, cloud water mixing ratio, 
-    ice mixing ratio, snow mixing ratio, graupel mixing ratio, hail mixing ratio,
-    and the tendencies for the cloud water, ice, snow, graupel, hail, and vapor mixing ratios
-    and computes the ice processes for the Milbrandt scheme.*/
+/**
+ * @brief Computes the ice processes for the Milbrandt scheme.
+ */
     void compute_ice_processes(
         const Field3D& temperature,
         const Field3D& p,
@@ -204,10 +238,9 @@ private:
         Field3D& dNh_dt
     );
 
-    /*This function computes the melting processes for the Milbrandt scheme.
-    Takes in the temperature, snow mixing ratio, graupel mixing ratio, hail mixing ratio, 
-    and the tendencies for the snow, graupel, hail, and rainwater mixing ratios
-    and computes the melting processes for the Milbrandt scheme.*/
+/**
+ * @brief Computes the melting processes for the Milbrandt scheme.
+ */
     void compute_melting_processes(
         const Field3D& temperature,
         const Field3D& qs,
@@ -224,10 +257,9 @@ private:
         Field3D& dNh_dt
     );
 
-    /*This function computes the sedimentation for the Milbrandt scheme.
-    Takes in the rainwater mixing ratio, snow mixing ratio, graupel mixing ratio, 
-    hail mixing ratio, and the tendencies for the rainwater, snow, graupel, 
-    and hail mixing ratios and computes the sedimentation for the Milbrandt scheme.*/
+/**
+ * @brief Computes the sedimentation for the Milbrandt scheme.
+ */
     void compute_sedimentation(
         const Field3D& qr,
         const Field3D& qs,
@@ -247,7 +279,13 @@ private:
         Field3D& dNh_dt
     );
 
-    // Gamma function for moment calculations
+    /**
+     * @brief Evaluates gamma function for integer and non-integer arguments.
+     */
     double gamma_function(double x);
+    
+    /**
+     * @brief Evaluates a simplified incomplete gamma approximation.
+     */
     double incomplete_gamma(double a, double x);
 };

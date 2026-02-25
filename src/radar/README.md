@@ -1,246 +1,141 @@
-# Radar Forward Operators Module
+# Radar Forward Operators
 
-This module implements forward operators that simulate radar observables from atmospheric model state, enabling data assimilation and radar signature validation.
+This module computes synthetic radar observables from the model state for backend diagnostics and export.
 
-## Overview
+## Current Scope
 
-Radar forward operators transform prognostic model variables (hydrometeor mixing ratios, wind fields) into radar observables that can be compared with actual radar measurements. This enables:
+Implemented observables:
+- Reflectivity in linear units: `Ze_linear` (mm^6/m^3)
+- Reflectivity in dBZ: `Z_dBZ`
+- Radial velocity: `Vr` (m/s)
+- Polarimetric reflectivity components: `ZH_dBZ`, `ZV_dBZ`, `ZDR_dB`
 
-- **Data assimilation**: Using radar observations to improve model forecasts
-- **Operator validation**: Comparing simulated vs. observed radar signatures
-- **Model evaluation**: Assessing microphysics and dynamics through radar metrics
+Implemented scheme IDs:
+- `reflectivity`
+- `velocity`
+- `zdr`
 
-## Architecture
+## File Layout
 
-```
-src/radar/
-├── radar.cpp                 # Main radar module coordinator
-├── factory.cpp/.hpp          # Scheme factory for radar operators
-├── base/
-│   └── radar_base.cpp/.hpp   # Common radar utilities and interfaces
-└── schemes/                  # Individual radar operator implementations
-    ├── reflectivity/         # Z/Ze operators
-    ├── velocity/             # Vr operators
-    └── zdr/                  # Polarimetric operators
-```
+Core interfaces:
+- `include/radar_base.hpp`
+- `include/radar.hpp`
 
-## Radar Physics Fundamentals
+Factory and shared utilities:
+- `src/radar/factory.cpp`
+- `src/radar/base/radar_base.cpp`
 
-### Radar Reflectivity (Z/Ze)
+Scheme implementations:
+- `src/radar/schemes/reflectivity/reflectivity.cpp`
+- `src/radar/schemes/velocity/velocity.cpp`
+- `src/radar/schemes/zdr/zdr.cpp`
 
-Radar reflectivity is proportional to the 6th moment of the drop size distribution (DSD):
+Runtime integration points:
+- `src/core/radar.cpp`
+- `src/core/equations.cpp`
 
-```
-Z = ∫ N(D) D^6 dD ∝ q_ρ^2 / N_t
-```
+## Scheme Behavior
 
-Where:
-- N(D): Drop size distribution (m⁻³ mm⁻¹)
-- D: Drop diameter (mm)
-- q: Mixing ratio (kg/kg)
-- ρ: Hydrometeor density (kg/m³)
-- N_t: Total number concentration (m⁻³)
+### Reflectivity (`scheme_id="reflectivity"`)
 
-### Equivalent Reflectivity Factor (Z_e)
+Operator tiers:
+- `fast_da`
+- `psd_moment`
 
-For Rayleigh scattering (λ >> D), the equivalent reflectivity factor is:
+Inputs:
+- Hydrometeor mixing ratios: `qr`, `qs`, `qg`, `qh`, `qi`
+- Optional number concentrations for moment-aware paths: `Nr`, `Ns`, `Ng`, `Nh`, `Ni`
 
-```
-Z_e = (λ^4 / π^5 |K|^2) ∫ σ_bscat dV
-```
+Outputs written:
+- `Ze_rain`, `Ze_snow`, `Ze_graupel`, `Ze_hail`, `Ze_ice`
+- `Ze_linear`, `Z_dBZ`, `ZH_dBZ`, `ZV_dBZ`
 
-Where:
-- λ: Radar wavelength
-- K: Dielectric factor (|K|² ≈ 0.93 for water, 0.197 for ice)
-- σ_bscat: Backscattering cross-section
+### Velocity (`scheme_id="velocity"`)
 
-### Doppler Radial Velocity (V_r)
+Sampling modes:
+- `point`
+- `beam_volume` (local 3x3x3 averaging)
 
-The radial component of velocity along the radar beam:
+Inputs:
+- Winds: `u`, `v`, `w`
+- Optional hydrometeors for scatterer correction
+- Radar location: `radar_x`, `radar_y`, `radar_z`
 
-```
-V_r = (u_r cosφ + v_θ sinφ) / |k̂| + V_t cosα
-```
+Outputs written:
+- `Vr`
 
-Where:
-- φ: Azimuth angle from radar
-- α: Elevation angle
-- V_t: Terminal fall velocity
-- k̂: Unit vector along radar beam
+Optional behavior:
+- `apply_scatterer_correction=true` applies a bulk fall-speed correction when hydrometeors are present.
 
-## Operator Implementations
+### Differential Reflectivity (`scheme_id="zdr"`)
 
-### Reflectivity Operators
+Operator tiers:
+- `simple`
+- `polarimetric_fo`
 
-#### Single-Moment Schemes (Kessler, Lin)
-```cpp
-// Power-law approximation
-Z = C * q_r^{1.5-2.0}  // C calibrated for scheme-specific DSD assumptions
-```
+Inputs:
+- Rain for simple tier (`qr`)
+- Rain/ice species for polarimetric tier (`qr`, `qs`, `qg`, `qh`, `qi`)
 
-**Assumptions:**
-- Monodisperse or fixed-shape drop size distributions
-- Single parameter (mixing ratio) determines reflectivity
-- Calibration constants from literature or tuning
+Outputs written:
+- `ZH_dBZ`, `ZV_dBZ`, `ZDR_dB`, `Ze_linear`, `Z_dBZ`
 
-#### Double-Moment Schemes (Thompson, Milbrandt)
-```cpp
-// Explicit DSD integration
-Z = ∫ N_0(D) * D^6 * exp(-Λ D) dD
-// where N_0 and Λ determined from q_r and N_r
-```
+## Runtime Guards and Data Safety
 
-**Features:**
-- Prognostic number concentrations (N_r, N_i, N_s, N_g)
-- More realistic DSD shapes (gamma, exponential)
-- Better microphysical consistency
+- Each scheme now reshapes and clears its owned output fields at the start of `compute(...)`.
+- Each scheme validates state/output dimensions; on mismatch it logs a warning once and returns zeroed output for that scheme.
+- `src/core/radar.cpp` sanitizes and clamps output ranges before returning:
+  - `Ze_*`: `[0, 1e12]`
+  - `Z*_dBZ`: `[-40, 100]`
+  - `ZDR_dB`: `[-12, 12]`
+  - `Vr`: `[-250, 250]`
+- `src/core/equations.cpp` has guarded fallback behavior in `calculate_radar_reflectivity()`:
+  - Uses radar scheme when available.
+  - Falls back to microphysics reflectivity if radar scheme is unavailable or throws.
+  - Keeps previous reflectivity field if fallback input/output shape is invalid.
 
-### Velocity Operators
+## API Usage Example
 
-#### Basic Implementation
-```cpp
-// Radial velocity from winds + fall speeds
-V_r[i][j][k] = (u[i][j][k] * cos_phi + v[i][j][k] * sin_phi) / range_factor
-             + terminal_fall_speed(q_species[i][j][k], density)
-```
-
-**Terminal velocity models:**
-- **Rain**: V_t = min(V_tmax, a × q_r^b) with empirical coefficients
-- **Ice**: V_t functions of habit, density, and size
-- **Hail**: Size-dependent fall speeds with density corrections
-
-### Polarimetric Operators
-
-#### Differential Reflectivity (Z_DR)
-```cpp
-Z_DR = 10 * log10(Z_H / Z_V)
-```
-
-**Physical interpretation:**
-- Z_H: Horizontal polarization reflectivity
-- Z_V: Vertical polarization reflectivity
-- Oblate spheroids (rain) → Z_DR > 0 dB
-- Spherical particles → Z_DR ≈ 0 dB
-
-#### Specific Differential Phase (K_DP)
-```cpp
-K_DP = (180/π) * ∫ (Re(f_HH) - Re(f_VV)) dz / λ
-```
-
-**Applications:**
-- Liquid water content retrieval
-- Rain rate estimation
-- Hail detection (negative K_DP)
-
-## Usage Examples
-
-### Basic Reflectivity Calculation
 ```cpp
 #include "radar.hpp"
 
-// Initialize radar operator
-auto radar = create_radar_scheme("reflectivity");
-radar->initialize(radar_config);
+RadarStateView state;
+state.NR = NR;
+state.NTH = NTH;
+state.NZ = NZ;
+state.u = &u;
+state.v = &v_theta;
+state.w = &w;
+state.qr = &qr;
+state.qs = &qs;
+state.qg = &qg;
+state.qh = &qh;
+state.qi = &qi;
 
-// Compute reflectivity from model state
-RadarStateView state{...};  // Model fields
-RadarOut output;
-radar->compute(radar_config, state, output);
+RadarConfig config;
+config.scheme_id = "reflectivity";
+config.operator_tier = "fast_da";
+config.has_qr = true;
+config.has_qs = true;
+config.has_qg = true;
+config.has_qh = true;
+config.has_qi = true;
 
-// Access results
-float ze_dBZ = output.reflectivity_dbz[i][j][k];
+auto scheme = RadarFactory::create(config.scheme_id);
+scheme->initialize(config, state.NR, state.NTH, state.NZ);
+
+RadarOut out;
+out.initialize(state.NR, state.NTH, state.NZ);
+scheme->compute(config, state, out);
 ```
 
-### Multi-Operator Pipeline
-```cpp
-// Initialize multiple operators
-auto reflectivity_op = create_radar_scheme("reflectivity");
-auto velocity_op = create_radar_scheme("velocity");
-auto zdr_op = create_radar_scheme("zdr");
+## Validation
 
-// Apply to same model state
-RadarOut ref_out, vel_out, zdr_out;
-reflectivity_op->compute(config, state, ref_out);
-velocity_op->compute(config, state, vel_out);
-zdr_op->compute(config, state, zdr_out);
-```
+Recommended backend checks:
 
-## Configuration
-
-### Radar Operator Settings
-```yaml
-radar:
-  scheme: "reflectivity"  # or "velocity", "zdr"
-  operator_tier: "fast_da"  # "fast_da", "psd_moment"
-  has_qr: true           # Enable rain reflectivity
-  has_qs: true           # Enable snow
-  has_qg: true           # Enable graupel
-  has_qh: true           # Enable hail
-```
-
-### Operator-Specific Parameters
-```yaml
-radar:
-  reflectivity:
-    wavelength_mm: 100.0    # S-band radar
-    temperature_correction: true
-    mixed_phase_handling: "max_reflectivity"
-  velocity:
-    terminal_velocity_model: "empirical"
-    density_correction: true
-  zdr:
-    canting_angle_model: "gaussian"
-    melting_layer_detection: true
-```
-
-## Validation and Testing
-
-### Radar Signature Validation
 ```bash
-# Test radar operators against known cases
-python tests/validate_simulation.py --radar-validation --timestep 100
-
-# Compare with idealized radar signatures
-python tests/radar_validation.py --scheme kessler --case supercell
+make test-backend-physics
+make test-guards
 ```
 
-### Operator Consistency Checks
-- **Z-V_r relationship**: Expected correlations for different storm types
-- **Polarimetric signatures**: Z_DR patterns for various hydrometeors
-- **Attenuation effects**: Path-integrated signal loss
-- **Beam broadening**: Volume averaging effects
-
-## Implementation Notes
-
-### Performance Considerations
-- **Computational cost**: Reflectivity ~ O(N_grid), Velocity ~ O(N_grid)
-- **Memory usage**: Additional 3D arrays for radar fields
-- **Cache efficiency**: Operators process contiguous data structures
-
-### Numerical Stability
-- **Division by zero**: Handle q_r = 0 cases gracefully
-- **Range checking**: Validate input field ranges
-- **Interpolation**: Smooth transitions at phase boundaries
-
-### Extensibility
-- **New operators**: Implement `RadarSchemeBase` interface
-- **Hybrid schemes**: Combine multiple operators
-- **Advanced physics**: Mie scattering, multiple scattering corrections
-
-## Scientific References
-
-### Reflectivity Operators
-- Smith et al. (1975) - Radar reflectivity factor calculations
-- Sauvageot (1992) - Rainfall rate relationships
-- Thompson et al. (2012) - Volumetric radar sampling operators
-
-### Velocity Operators
-- Doviak and Zrnić (1993) - Doppler radar principles
-- Miller et al. (1986) - Terminal velocity parameterizations
-
-### Polarimetric Radar
-- Zrnić (1987) - Differential reflectivity theory
-- Ryzhkov and Zrnić (1998) - Polarimetric applications
-- Kumjian (2013) - Polarimetric radar signatures
-
-This module provides the foundation for radar data assimilation and model validation in convective storm research.
+These checks verify export contracts, numeric bounds, non-finite guards, and renderer-facing field compatibility.

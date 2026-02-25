@@ -1,3 +1,12 @@
+/**
+ * @file factory.hpp
+ * @brief Declarations for the radar module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the radar runtime and scheme implementations.
+ * This file is part of the src/radar subsystem.
+ */
+
 #pragma once
 
 #include <memory>

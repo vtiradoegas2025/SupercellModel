@@ -1,126 +1,178 @@
 #pragma once
-#include <vector>
+
 #include <memory>
 #include <string>
+#include <vector>
+
 #include "field3d.hpp"
+#include "physical_constants.hpp"
 
-// Turbulence module constants
-namespace turbulence_constants {
-    inline constexpr double g = 9.81;          // gravity [m/s²]
-    inline constexpr double kappa = 0.4;       // von Karman constant
-    inline constexpr double C_s_default = 0.18; // default Smagorinsky coefficient
-    inline constexpr double Pr_t_default = 0.7; // default turbulent Prandtl number
-    inline constexpr double Sc_t_default = 0.7; // default turbulent Schmidt number
-}
+/**
+ * @file turbulence_base.hpp
+ * @brief Base contracts for subgrid turbulence parameterizations.
+ *
+ * Declares shared configuration/state models and tendency/diagnostic
+ * outputs used by Smagorinsky and TKE-based schemes.
+ * Runtime code uses this interface to select and step a turbulence model.
+ */
 
-// Configuration for turbulence schemes
-struct TurbulenceConfig {
+struct TerrainMetrics3D;
+struct Topography2D;
+
+namespace turbulence_constants
+{
+inline constexpr double g = physical_constants::gravity_ms2;
+inline constexpr double kappa = physical_constants::von_karman_constant;
+inline constexpr double C_s_default = 0.18;
+inline constexpr double Pr_t_default = 0.7;
+inline constexpr double Sc_t_default = 0.7;
+} // namespace turbulence_constants
+
+struct TurbulenceConfig
+{
     std::string scheme_id = "smagorinsky";
-    double dt_sgs = 1.0;  // seconds (cadence, often = dynamics dt)
-    std::string mode = "3d";  // "3d", "horizontal_only", "vertical_only"
-    std::string filter_width = "cubic_root";  // "dx", "cubic_root", "user"
-    double Cs = turbulence_constants::C_s_default;  // Smagorinsky coefficient
-    double Pr_t = turbulence_constants::Pr_t_default;  // turbulent Prandtl number
-    double Sc_t = turbulence_constants::Sc_t_default;  // turbulent Schmidt number
-    bool dynamic_Cs = false;  // dynamic Smagorinsky (future extension)
-    std::string stability_correction = "none";  // "none", "ri", "tke_based"
-    bool enable_moist_buoyancy = false;  // for TKE buoyancy production
+    double dt_sgs = 1.0;
+    std::string mode = "3d";
+    std::string filter_width = "cubic_root";
+    double Cs = turbulence_constants::C_s_default;
+    double Pr_t = turbulence_constants::Pr_t_default;
+    double Sc_t = turbulence_constants::Sc_t_default;
+    bool dynamic_Cs = false;
+    std::string stability_correction = "none";
+    bool enable_moist_buoyancy = false;
     bool enable_diagnostics = false;
-    double nu_t_max = 1000.0;  // maximum eddy viscosity [m²/s]
-    double K_max = 1000.0;     // maximum eddy diffusivity [m²/s]
+    double nu_t_max = 1000.0;
+    double K_max = 1000.0;
 };
 
-// Grid metrics for turbulence calculations
-struct GridMetrics {
-    double dx = 1000.0;  // horizontal grid spacing [m]
-    double dy = 1000.0;  // horizontal grid spacing [m]
-    std::vector<double> dz;  // vertical grid spacing [m] (nz)
-    std::vector<double> z_int;  // interface heights [m] (nz+1)
+struct GridMetrics
+{
+    double dx = 1000.0;
+    double dy = 1000.0;
+    std::vector<double> dz;
+    std::vector<double> z_int;
+    bool terrain_metrics_active = false;
+    const TerrainMetrics3D* terrain_metrics = nullptr;
+    const Topography2D* terrain_topography = nullptr;
 };
 
-// Required fields for turbulence computation
-enum class TurbulenceRequirements {
-    BASIC = 1,           // u, v, w, rho, theta
-    MOISTURE = 2,        // includes qv for buoyancy
-    TKE = 4,            // requires TKE field
-    STABILITY = 8       // requires stability corrections
+enum class TurbulenceRequirements
+{
+    BASIC = 1,
+    MOISTURE = 2,
+    TKE = 4,
+    STABILITY = 8
 };
 
-// Single column/3D state for turbulence computation
-struct TurbulenceStateView {
-    // Required basic state
-    const Field3D* u = nullptr;    // zonal wind [m/s]
-    const Field3D* v = nullptr;    // meridional wind [m/s]
-    const Field3D* w = nullptr;    // vertical wind [m/s]
-    const Field3D* rho = nullptr;  // density [kg/m³]
-    const Field3D* theta = nullptr; // potential temperature [K]
+struct TurbulenceStateView
+{
+    const Field3D* u = nullptr;
+    const Field3D* v = nullptr;
+    const Field3D* w = nullptr;
+    const Field3D* rho = nullptr;
+    const Field3D* theta = nullptr;
+    const Field3D* qv = nullptr;
+    const Field3D* tke = nullptr;
 
-    // Optional for advanced schemes
-    const Field3D* qv = nullptr;   // water vapor mixing ratio [kg/kg]
-    const Field3D* tke = nullptr;  // TKE [m²/s²]
-
-    // Grid information
-    int NR = 0, NTH = 0, NZ = 0;  // grid dimensions
+    int NR = 0;
+    int NTH = 0;
+    int NZ = 0;
 };
 
-// Output tendencies and diagnostics
-struct TurbulenceTendencies {
-    Field3D dudt_sgs;      // u-momentum tendency [m/s²]
-    Field3D dvdt_sgs;      // v-momentum tendency [m/s²]
-    Field3D dwdt_sgs;      // w-momentum tendency [m/s²]
-    Field3D dthetadt_sgs;  // temperature tendency [K/s]
-    Field3D dqvdt_sgs;     // moisture tendency [kg/kg/s] (optional)
-    Field3D dtkedt_sgs;    // TKE tendency [m²/s³] (TKE scheme)
+struct TurbulenceTendencies
+{
+    Field3D dudt_sgs;
+    Field3D dvdt_sgs;
+    Field3D dwdt_sgs;
+    Field3D dthetadt_sgs;
+    Field3D dqvdt_sgs;
+    Field3D dtkedt_sgs;
 };
 
-struct TurbulenceDiagnostics {
-    // Eddy coefficients (can be 3D or interface-based)
-    Field3D nu_t;      // eddy viscosity [m²/s]
-    Field3D K_theta;   // temperature diffusivity [m²/s]
-    Field3D K_q;       // moisture diffusivity [m²/s]
-    Field3D K_tke;     // TKE diffusivity [m²/s] (TKE scheme)
+struct TurbulenceDiagnostics
+{
+    Field3D nu_t;
+    Field3D K_theta;
+    Field3D K_q;
+    Field3D K_tke;
 
-    // TKE budget terms (TKE scheme diagnostics)
-    Field3D shear_prod;    // shear production [m²/s³]
-    Field3D buoy_prod;     // buoyancy production [m²/s³]
-    Field3D dissipation;   // dissipation [m²/s³]
+    Field3D shear_prod;
+    Field3D buoy_prod;
+    Field3D dissipation;
 
-    // Dynamic coefficients (future extension)
-    Field3D Cs_eff;    // effective Smagorinsky coefficient
-    Field3D Pr_t_eff;  // effective Prandtl number
+    Field3D Cs_eff;
+    Field3D Pr_t_eff;
 };
 
-// Abstract base class for turbulence schemes
-class TurbulenceSchemeBase {
+class TurbulenceSchemeBase
+{
 public:
+    /**
+     * @brief Virtual destructor for polymorphic cleanup.
+     */
     virtual ~TurbulenceSchemeBase() = default;
 
-    // Scheme identification and requirements
+    /**
+     * @brief Returns the scheme identifier.
+     * @return Scheme name.
+     */
     virtual std::string name() const = 0;
+
+    /**
+     * @brief Returns required input fields for this scheme.
+     * @return Bitmask of TurbulenceRequirements.
+     */
     virtual int required_fields() const = 0;
 
-    // Initialization
+    /**
+     * @brief Initializes scheme state and coefficients.
+     * @param cfg Turbulence configuration.
+     */
     virtual void initialize(const TurbulenceConfig& cfg) = 0;
 
-    // Core computation
-    virtual void compute(
-        const TurbulenceConfig& cfg,
-        const GridMetrics& grid,
-        const TurbulenceStateView& state,
-        TurbulenceTendencies& tend,
-        TurbulenceDiagnostics* diag_opt = nullptr) = 0;
+    /**
+     * @brief Computes subgrid tendencies and optional diagnostics.
+     * @param cfg Turbulence configuration.
+     * @param grid Grid metrics.
+     * @param state State view.
+     * @param tend Output tendencies.
+     * @param diag_opt Optional diagnostics output.
+     */
+    virtual void compute(const TurbulenceConfig& cfg,
+                         const GridMetrics& grid,
+                         const TurbulenceStateView& state,
+                         TurbulenceTendencies& tend,
+                         TurbulenceDiagnostics* diag_opt = nullptr) = 0;
 };
 
-// Factory function type
 using TurbulenceSchemeFactory = std::unique_ptr<TurbulenceSchemeBase> (*)(const TurbulenceConfig&);
 
-// Global turbulence scheme instance and configuration
 extern std::unique_ptr<TurbulenceSchemeBase> turbulence_scheme;
 extern TurbulenceConfig global_turbulence_config;
 
-// Factory and initialization functions
+/**
+ * @brief Creates a turbulence scheme by name.
+ * @param scheme_name Scheme identifier.
+ * @return Owning pointer to a scheme instance.
+ */
 std::unique_ptr<TurbulenceSchemeBase> create_turbulence_scheme(const std::string& scheme_name);
+
+/**
+ * @brief Lists registered turbulence schemes.
+ * @return Collection of scheme identifiers.
+ */
 std::vector<std::string> get_available_turbulence_schemes();
-void initialize_turbulence(const std::string& scheme_name,
-                          const TurbulenceConfig& cfg = TurbulenceConfig{});
+
+/**
+ * @brief Initializes the global turbulence subsystem.
+ * @param scheme_name Scheme identifier.
+ * @param cfg Optional turbulence configuration.
+ */
+void initialize_turbulence(const std::string& scheme_name, const TurbulenceConfig& cfg = TurbulenceConfig{});
+
+/**
+ * @brief Steps turbulence tendencies at current model time.
+ * @param current_time Current simulation time in seconds.
+ * @param tendencies Output tendency container.
+ */
 void step_turbulence(double current_time, TurbulenceTendencies& tendencies);

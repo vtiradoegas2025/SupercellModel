@@ -1,7 +1,18 @@
+/**
+ * @file reflectivity.hpp
+ * @brief Declarations for the radar module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the radar runtime and scheme implementations.
+ * This file is part of the src/radar subsystem.
+ */
+
 #pragma once
 
 #include "radar_base.hpp"
 #include <vector>
+#include <algorithm>
+#include <cmath>
 
 /**
  * @brief Reflectivity radar scheme
@@ -14,31 +25,36 @@
 
 class ReflectivityScheme : public RadarSchemeBase {
 private:
-    // Radar constants
-    static constexpr double K_w_squared = 0.93;  // Dielectric factor for water at S-band
-    static constexpr double Z_min_dBZ = -30.0;   // Minimum detectable reflectivity
+    static constexpr double K_w_squared = 0.93;
+    static constexpr double Z_min_dBZ = -30.0;
 
-    // Hydrometeor properties (S-band, from AMS literature)
+    /**
+     * @brief Hydrometeor PSD/density parameters used by reflectivity operators.
+     */
     struct HydrometeorProps {
-        double density;      // kg/m³
-        double alpha;        // Size distribution parameter
-        double c;           // Size distribution parameter
-        double d;           // Size distribution parameter
+        double density;
+        double alpha;
+        double c;
+        double d;
     };
 
-    // Species-specific properties
     static const HydrometeorProps rain_props;
     static const HydrometeorProps snow_props;
     static const HydrometeorProps graupel_props;
     static const HydrometeorProps hail_props;
     static const HydrometeorProps ice_props;
 
-    // Grid dimensions
     int NR_, NTH_, NZ_;
 
 public:
+    /**
+     * @brief Initializes reflectivity operator for active grid dimensions.
+     */
     void initialize(const RadarConfig& config, int NR, int NTH, int NZ) override;
 
+    /**
+     * @brief Computes reflectivity outputs for current radar state.
+     */
     void compute(const RadarConfig& config, const RadarStateView& state, RadarOut& out) override;
 
     std::string name() const override { return "reflectivity"; }
@@ -88,16 +104,24 @@ private:
      * @brief Convert linear reflectivity to dBZ
      */
     static float linear_to_dbz(float Ze_linear) {
-        if (Ze_linear <= 1e-10) {
+        if (!std::isfinite(static_cast<double>(Ze_linear)) || Ze_linear <= 1e-10f) {
             return Z_min_dBZ;
         }
-        return 10.0f * std::log10(Ze_linear);
+        const float clamped = std::clamp(Ze_linear, 1.0e-10f, 1.0e12f);
+        const float dbz = 10.0f * std::log10(clamped);
+        return std::isfinite(static_cast<double>(dbz)) ? dbz : Z_min_dBZ;
     }
 
     /**
      * @brief Convert dBZ to linear reflectivity
      */
     static float dbz_to_linear(float Z_dbz) {
-        return std::pow(10.0f, Z_dbz / 10.0f);
+        if (!std::isfinite(static_cast<double>(Z_dbz)))
+        {
+            return 0.0f;
+        }
+        const float clamped = std::clamp(Z_dbz, -40.0f, 100.0f);
+        const float linear = std::pow(10.0f, clamped / 10.0f);
+        return std::isfinite(static_cast<double>(linear)) ? linear : 0.0f;
     }
 };

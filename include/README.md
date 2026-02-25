@@ -10,6 +10,12 @@ This directory contains the header files defining interfaces, base classes, and 
   - Contains main initialization and stepping functions
   - Entry point for external coupling
 
+### Runtime/Validation Headers
+- **`runtime_config.hpp`** - Runtime configuration globals and parser-facing declarations
+- **`field_contract.hpp`** - CM1-style export/validation contract metadata
+- **`field_validation.hpp`** - Field-level guard/validation result structures and checks
+- **`physical_constants.hpp`** - Shared constants consumed across physics modules
+
 ## Physics Module Base Classes
 
 Each physics module provides a base class defining the interface for all schemes within that module. These headers contain:
@@ -62,7 +68,7 @@ Each physics module provides a base class defining the interface for all schemes
 - **`RadarOut`** - Output structure for radar observables
 - **Reflectivity operators** (Z/Ze from hydrometeor mixing ratios)
 - **Doppler velocity operators** (V_r from wind field projections)
-- **Polarimetric operators** (Z_DR, K_DP, ρ_HV from particle properties)
+- **Polarimetric operators** (Z_DR with ZH/ZV components)
 - **See `src/radar/README.md` for implementation details**
 
 ### radiation_base.hpp - Atmospheric Radiation

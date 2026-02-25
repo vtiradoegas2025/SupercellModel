@@ -1,32 +1,50 @@
+/**
+ * @file ysu.hpp
+ * @brief Declarations for the boundary_layer module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the boundary_layer runtime and scheme implementations.
+ * This file is part of the src/boundary_layer subsystem.
+ */
+
 #pragma once
-#include "../../base/surface_fluxes.hpp"
+#include "boundary_layer/base/surface_fluxes.hpp"
 #include "boundary_layer_base.hpp"
 
-/*This class implements the YSU boundary layer scheme.
-This scheme is a one-dimensional boundary layer scheme that 
-is used to compute the boundary layer physics of the simulation.
-It is based on the YSU scheme developed by Hong et al. (2006).*/
+/**
+ * @brief Implements the YSU boundary layer scheme.
+ */
 class YSUScheme : public BoundaryLayerSchemeBase {
 private:
-    // YSU scheme parameters (Hong et al. 2006)
-    double pblfac_ = 1.0;     // PBL factor
-    double cn_ = 0.75;        // coefficient for eddy diffusivity
-    double ck_ = 0.1;         // coefficient for nonlocal transport
-    double ce_ = 0.5;         // entrainment efficiency
-    double c0_ = 0.15;        // surface exchange coefficient
+    double pblfac_ = 1.0;
+    double cn_ = 0.75;
+    double ck_ = 0.1;
+    double ce_ = 0.5;
+    double c0_ = 0.15;
 
-    // Scheme state
-    std::vector<double> K_m_;     // momentum diffusivity profile
-    std::vector<double> K_h_;     // heat diffusivity profile
+    std::vector<double> K_m_;
+    std::vector<double> K_h_;
 
 public:
+    /**
+     * @brief Constructs the YSU boundary-layer scheme.
+     */
     YSUScheme();
 
     std::string name() const override { return "ysu"; }
+    /**
+     * @brief Returns required state-field mask for this scheme.
+     */
     int required_fields() const override;
 
+    /**
+     * @brief Initializes scheme parameters from runtime configuration.
+     */
     void initialize(const BoundaryLayerConfig& cfg) override;
 
+    /**
+     * @brief Computes one-column YSU turbulence tendencies.
+     */
     void compute_column(
         const BoundaryLayerConfig& cfg,
         const SurfaceConfig& sfc,
@@ -35,13 +53,17 @@ public:
         BoundaryLayerDiagnostics* diag_opt = nullptr) override;
 
 private:
-    // Diagnose PBL height
+    /**
+     * @brief Diagnoses boundary-layer depth from bulk Richardson criteria.
+     */
     double diagnose_pbl_height(
         const BoundaryLayerColumnStateView& col,
         const BoundaryLayerConfig& cfg
     );
 
-    // Compute K-profile diffusivities
+    /**
+     * @brief Computes eddy-diffusivity vertical profiles.
+     */
     void compute_k_profile(
         const BoundaryLayerColumnStateView& col,
         double h, double ustar,
@@ -49,7 +71,9 @@ private:
         std::vector<double>& K_h
     );
 
-    // Compute nonlocal transport term
+    /**
+     * @brief Computes nonlocal transport terms for scalars.
+     */
     void compute_nonlocal_transport(
         const BoundaryLayerColumnStateView& col,
         const surface_fluxes::BulkFluxes& fluxes,
@@ -58,7 +82,9 @@ private:
         std::vector<double>& nonlocal_qv
     );
 
-    // Apply diffusion tendencies
+    /**
+     * @brief Applies vertical diffusion tendencies to column fields.
+     */
     void apply_diffusion_tendencies(
         const BoundaryLayerColumnStateView& col,
         const std::vector<double>& K_m,

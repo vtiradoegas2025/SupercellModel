@@ -1,14 +1,26 @@
+/**
+ * @file factory.hpp
+ * @brief Declarations for the turbulence module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the turbulence runtime and scheme implementations.
+ * This file is part of the src/turbulence subsystem.
+ */
+
 #pragma once
 #include <memory>
 #include <string>
-#include "../../include/turbulence_base.hpp"
+#include "turbulence_base.hpp"
 
-// Forward declarations of scheme classes
 class SmagorinskyScheme;
 class TKEScheme;
 
-// Factory function to create turbulence schemes
+/**
+ * @brief Creates a turbulence scheme by configured name.
+ */
 std::unique_ptr<TurbulenceSchemeBase> create_turbulence_scheme(const std::string& scheme_name);
 
-// Registry of available schemes
+/**
+ * @brief Returns names of available turbulence schemes.
+ */
 std::vector<std::string> get_available_turbulence_schemes();

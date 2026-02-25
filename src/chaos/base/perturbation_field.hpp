@@ -1,15 +1,24 @@
+/**
+ * @file perturbation_field.hpp
+ * @brief Declarations for the chaos module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the chaos runtime and scheme implementations.
+ * This file is part of the src/chaos subsystem.
+ */
+
 #pragma once
 #include "random_generator.hpp"
+#include "field3d.hpp"
 #include <vector>
 #include <string>
 
 namespace chaos 
 {
 
-/*This function generates the white noise perturbation field for the 3D field.
-Takes in the random number generator, the number of rows, the number of columns,
-the number of levels, the stream key, and the field name
-and generates the white noise perturbation field for the 3D field.*/
+/**
+ * @brief Generates the white noise perturbation field for the 3D field.
+ */
 /**
  * @brief Generate white noise perturbation field
  * @param rng Random number generator
@@ -25,6 +34,18 @@ std::vector<std::vector<std::vector<double>>> generate_white_noise_3d(
     size_t NR,
     size_t NTH,
     size_t NZ,
+    uint64_t stream_key,
+    const std::string& field_name = ""
+);
+
+/**
+ * @brief Generate white noise perturbation field in contiguous Field3D layout
+ */
+Field3D generate_white_noise_field3d(
+    ChaosRNG& rng,
+    int NR,
+    int NTH,
+    int NZ,
     uint64_t stream_key,
     const std::string& field_name = ""
 );
@@ -56,6 +77,11 @@ void scale_perturbation_field(
     double sigma
 );
 
+void scale_perturbation_field(
+    Field3D& field,
+    double sigma
+);
+
 /**
  * @brief Scale perturbation field by specified amplitude (2D version)
  * @param field Input/output perturbation field
@@ -73,6 +99,10 @@ void scale_perturbation_field(
  */
 double renormalize_to_unit_variance(
     std::vector<std::vector<std::vector<double>>>& field
+);
+
+double renormalize_to_unit_variance(
+    Field3D& field
 );
 
 /**
@@ -98,9 +128,6 @@ void apply_physical_bounds(
     double min_value = 0.0
 );
 
-//==============================================================================
-// Temporal evolution (AR(1) process)
-//==============================================================================
 
 /**
  * @brief Evolve perturbation field using AR(1) process
@@ -114,6 +141,15 @@ void apply_physical_bounds(
 void evolve_ar1_3d(
     std::vector<std::vector<std::vector<double>>>& xi,
     const std::vector<std::vector<std::vector<double>>>& xi_prev,
+    double rho_t,
+    ChaosRNG& rng,
+    uint64_t stream_key,
+    uint64_t time_step
+);
+
+void evolve_ar1_3d(
+    Field3D& xi,
+    const Field3D& xi_prev,
     double rho_t,
     ChaosRNG& rng,
     uint64_t stream_key,
@@ -146,4 +182,4 @@ void evolve_ar1_2d(
  */
 double compute_temporal_correlation(double dt, double tau_t);
 
-} // namespace chaos
+}

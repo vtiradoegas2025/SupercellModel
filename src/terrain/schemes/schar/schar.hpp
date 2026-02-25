@@ -1,9 +1,20 @@
+/**
+ * @file schar.hpp
+ * @brief Declarations for the terrain module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the terrain runtime and scheme implementations.
+ * This file is part of the src/terrain subsystem.
+ */
+
 #pragma once
-#include "../../base/topography.hpp"
+#include "terrain/base/topography.hpp"
 
-/*This file contains the declaration of the Schär terrain scheme.
-It manages the initialization of the Schär terrain scheme and the building of the topography.*/ 
+ 
 
+/**
+ * @brief Schar-type terrain scheme for idealized mountain-wave topography.
+ */
 class ScharScheme : public TerrainSchemeBase 
 {
 private:
@@ -12,14 +23,16 @@ private:
 public:
     ScharScheme();
 
-    /*This function gets the name of the Schär terrain scheme.
-    Takes in the name and returns the name of the Schär terrain scheme.*/
+    /**
+ * @brief Gets the name of the Schär terrain scheme.
+ */
     std::string name() const override { return "schar"; }
 
     void initialize(const TerrainConfig& cfg) override;
 
-    /*This function builds the topography.
-    Takes in the configuration and the topography and builds the topography.*/
+    /**
+ * @brief Builds the topography.
+ */
     void build_topography(const TerrainConfig& cfg, Topography2D& topo) override;
 
     void build_metrics(const TerrainConfig& cfg,
@@ -28,6 +41,8 @@ public:
                       TerrainDiagnostics* diag_opt = nullptr) override;
 
 private:
-    // Compute coordinates for grid point
+    /**
+     * @brief Computes physical x/y coordinates for a grid index pair.
+     */
     void get_coordinates(int i, int j, double& x, double& y) const;
 };

@@ -1,15 +1,25 @@
+/**
+ * @file radiative_transfer.cpp
+ * @brief Implementation for the radiation module.
+ *
+ * Provides executable logic for the radiation runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/radiation subsystem.
+ */
+
 #include "radiative_transfer.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
-/*This file contains the implementation of the radiative transfer scheme.*/
 
 namespace radiative_transfer 
 {
 
-/*This function computes the heating rate from the flux divergence.
-Takes in the density, the vertical grid spacing, the net flux, and the heating rate and computes the heating rate from the flux divergence.*/
+/**
+ * @brief Computes the heating rate from the flux divergence.
+ */
 void heating_rate_from_flux_divergence(
     const std::vector<double>& rho,
     const std::vector<double>& dz,
@@ -19,24 +29,33 @@ void heating_rate_from_flux_divergence(
 {
     const size_t nz = rho.size();
     dTdt.resize(nz);
+    if (dz.size() != nz || Fnet.size() != nz + 1)
+    {
+        std::fill(dTdt.begin(), dTdt.end(), 0.0);
+        return;
+    }
 
-    // Use dry air specific heat capacity (simplified)
-    const double cp = 1004.0;  // J/kg/K
+    const double cp = 1004.0;
 
-    // Iterate over the vertical levels and compute the heating rate from the flux divergence.
     for (size_t k = 0; k < nz; ++k) 
     {
-        // Central difference for flux divergence
+        if (rho[k] <= 0.0 || !std::isfinite(rho[k]) || dz[k] <= 0.0 || !std::isfinite(dz[k]))
+        {
+            dTdt[k] = 0.0;
+            continue;
+        }
         double dFdz = (Fnet[k+1] - Fnet[k]) / dz[k];
-        // Heating rate: -1/(ρ cp) * dF/dz
         dTdt[k] = -dFdz / (rho[k] * cp);
+        if (!std::isfinite(dTdt[k]))
+        {
+            dTdt[k] = 0.0;
+        }
     }
 }
 
-/*This function computes the grey longwave two stream solution.
-Takes in the temperature, the optical depth layers, the surface temperature, 
-the emissivity, the upward flux, and the downward flux and computes the
-grey longwave two stream solution.*/
+/**
+ * @brief Computes the grey longwave two stream solution.
+ */
 void grey_lw_two_stream(
     const std::vector<double>& T,
     const std::vector<double>& tau_layers,
@@ -49,52 +68,45 @@ void grey_lw_two_stream(
     const size_t nz = T.size();
     Fup.resize(nz + 1);
     Fdn.resize(nz + 1);
+    if (tau_layers.size() != nz)
+    {
+        std::fill(Fup.begin(), Fup.end(), 0.0);
+        std::fill(Fdn.begin(), Fdn.end(), 0.0);
+        return;
+    }
 
-    // Boundary conditions at top (TOA)
-    Fdn[nz] = 0.0;  // no downward LW from space
-    Fup[nz] = 0.0;  // initially zero, will be computed
+    Fdn[nz] = 0.0;
+    Fup[nz] = 0.0;
 
-    // Boundary conditions at surface
-    double B_sfc = planck_function(T_sfc);
-    Fdn[0] = 0.0;  // no downward flux at surface
+    Fdn[0] = 0.0;
     Fup[0] = emissivity * stefan_boltzmann(T_sfc) +
              (1.0 - emissivity) * Fdn[0];
 
-    // Two-stream solution (simplified grey gas)
-    // Work from top down for downward flux, bottom up for upward flux
 
   
-    // Iterate over the vertical levels and compute the downward flux.
     for (int k = static_cast<int>(nz) - 1; k >= 0; --k) 
     {
-        double tau_k = tau_layers[k];
+        double tau_k = std::max(0.0, tau_layers[k]);
         double B_k = planck_function(T[k]);
 
-        // Simple two-stream approximation
-        // dF↓/dτ = -F↓ + πB
-        // Solution: F↓(τ) = F↓(0) * exp(-τ) + ∫ πB exp(-(τ-τ')) dτ'
-        // Approximate as: F↓(k) ≈ F↓(k+1) * exp(-τ_k) + πB_k * (1 - exp(-τ_k))
 
         double exp_tau = exp(-tau_k);
         Fdn[k] = Fdn[k+1] * exp_tau + radiation_constants::pi * B_k * (1.0 - exp_tau);
     }
 
-    // Iterate over the vertical levels and compute the upward flux.
     for (size_t k = 0; k < nz; ++k) 
     {
-        double tau_k = tau_layers[k];
+        double tau_k = std::max(0.0, tau_layers[k]);
         double B_k = planck_function(T[k]);
 
-        // F↑(k+1) = F↑(k) * exp(-τ_k) + πB_k * (1 - exp(-τ_k))
         double exp_tau = exp(-tau_k);
         Fup[k+1] = Fup[k] * exp_tau + radiation_constants::pi * B_k * (1.0 - exp_tau);
     }
 }
 
-/*This function computes the grey shortwave two stream solution.
-Takes in the optical depth layers, the cosine of the zenith angle, the solar constant, 
-the surface albedo, the upward flux, and the downward flux and computes the
-grey shortwave two stream solution.*/
+/**
+ * @brief Computes the grey shortwave two stream solution.
+ */
 void grey_sw_beer_lambert(
     const std::vector<double>& tau_layers,
     double mu0,
@@ -107,42 +119,36 @@ void grey_sw_beer_lambert(
     const size_t nz = tau_layers.size();
     Fup.resize(nz + 1);
     Fdn.resize(nz + 1);
+    if (nz == 0)
+    {
+        Fup[0] = 0.0;
+        Fdn[0] = 0.0;
+        return;
+    }
 
-    // Ensure mu0 > 0 (avoid division by zero)
     mu0 = std::max(mu0, 1e-6);
 
-    // TOA downward flux
     Fdn[nz] = mu0 * S0;
     Fup[nz] = 0.0;
 
-    // Surface boundary (reflection)
-    double cum_tau = 0.0;  // cumulative optical depth from top
-
-    // Iterate over the vertical levels and compute the downward flux.
     for (int k = static_cast<int>(nz) - 1; k >= 0; --k) 
     {
-        cum_tau += tau_layers[k];
-        // Beer-Lambert: F↓(z) = F↓(TOA) * exp(-τ/μ₀)
-        Fdn[k] = Fdn[nz] * exp(-cum_tau / mu0);
+        const double tau_k = std::max(0.0, tau_layers[k]);
+        Fdn[k] = Fdn[k + 1] * exp(-tau_k / mu0);
     }
 
-    // Surface reflection
     Fup[0] = albedo_sfc * Fdn[0];
 
-    // Upward attenuation (simplified - no scattering)
-    cum_tau = 0.0;
-
-    // Iterate over the vertical levels and compute the upward flux.
     for (size_t k = 0; k < nz; ++k) 
     {
-        cum_tau += tau_layers[k];
-        // Simple upward attenuation (no absorption in upward path)
-        Fup[k+1] = Fup[k] * exp(-cum_tau / mu0);
+        const double tau_k = std::max(0.0, tau_layers[k]);
+        Fup[k + 1] = Fup[k] * exp(-tau_k / mu0);
     }
 }
 
-/*This function computes the optical depth profile.
-Takes in the pressure, the reference pressure, and the optical depth and computes the optical depth profile.*/
+/**
+ * @brief Computes the optical depth profile.
+ */
 std::vector<double> compute_optical_depth_profile(
     const std::vector<double>& p,
     double tau_ref,
@@ -150,46 +156,61 @@ std::vector<double> compute_optical_depth_profile(
 ) 
 {
     const size_t nz = p.size();
-    std::vector<double> tau_profile(nz + 1);
-
-    const double p_ref = 100000.0;  // reference pressure (Pa)
-
-    // Optical depth at interfaces (assume linear in pressure)
-    tau_profile[0] = 0.0;  // surface
-
-    // Iterate over the vertical levels and compute the optical depth profile.
-    for (size_t k = 1; k <= nz; ++k) 
+    std::vector<double> tau_profile(nz + 1, 0.0);
+    if (nz == 0 || !std::isfinite(tau_ref) || tau_ref <= 0.0 || !std::isfinite(n) || n <= 0.0)
     {
-        double p_avg = (k < nz) ? 0.5 * (p[k-1] + p[k]) : p[nz-1];
-        tau_profile[k] = tau_ref * pow(p_avg / p_ref, n);
+        return tau_profile;
+    }
+
+    const double p_ref = 100000.0;
+    std::vector<double> p_interfaces(nz + 1, 0.0);
+    p_interfaces[0] = std::max(0.0, p[0]);
+
+    for (size_t k = 1; k < nz; ++k)
+    {
+        p_interfaces[k] = std::max(0.0, 0.5 * (p[k - 1] + p[k]));
+    }
+    p_interfaces[nz] = 0.0;
+
+    for (size_t k = 0; k <= nz; ++k)
+    {
+        const double pressure_ratio = std::max(0.0, p_interfaces[k] / p_ref);
+        tau_profile[k] = tau_ref * std::pow(pressure_ratio, n);
+    }
+    for (size_t k = 1; k <= nz; ++k)
+    {
+        tau_profile[k] = std::min(tau_profile[k], tau_profile[k - 1]);
     }
 
     return tau_profile;
 }
 
-/*This function computes the layer optical depths.
-Takes in the optical depth profile, and the vertical grid spacing and computes the layer optical depths.*/
+/**
+ * @brief Computes the layer optical depths.
+ */
 std::vector<double> compute_layer_optical_depths(
     const std::vector<double>& tau_profile,
     const std::vector<double>& dz
 ) 
 {
     const size_t nz = dz.size();
-    std::vector<double> dtau(nz);
+    std::vector<double> dtau(nz, 0.0);
+    if (tau_profile.size() != nz + 1)
+    {
+        return dtau;
+    }
 
-    // Iterate over the vertical levels and compute the layer optical depths.
     for (size_t k = 0; k < nz; ++k) 
     {
-        // Average optical depth across layer
-        dtau[k] = 0.5 * (tau_profile[k] + tau_profile[k+1]);
+        dtau[k] = std::max(0.0, tau_profile[k] - tau_profile[k + 1]);
     }
 
     return dtau;
 }
 
-/*This function checks the energy conservation.
-Takes in the density, the vertical grid spacing, the heating rate, 
-and the net flux and checks the energy conservation.*/
+/**
+ * @brief Checks the energy conservation.
+ */
 double check_energy_conservation(
     const std::vector<double>& rho,
     const std::vector<double>& dz,
@@ -199,21 +220,22 @@ double check_energy_conservation(
 
 {
     const size_t nz = rho.size();
-    const double cp = 1004.0;  // J/kg/K
+    if (dz.size() != nz || dTdt.size() != nz || Fnet.size() != nz + 1)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    const double cp = 1004.0;
 
-    // Column-integrated heating
     double integrated_heating = 0.0;
 
-    // Iterate over the vertical levels and compute the column-integrated heating.
     for (size_t k = 0; k < nz; ++k) 
     {
         integrated_heating += rho[k] * cp * dTdt[k] * dz[k];
     }
 
-    // Net flux difference (should equal integrated heating)
-    double net_flux_diff = Fnet[nz] - Fnet[0];  // TOA - surface
+    double net_flux_diff = Fnet[nz] - Fnet[0];
 
-    return integrated_heating - net_flux_diff;  // should be ~0
+    return integrated_heating - net_flux_diff;
 }
 
-} // namespace radiative_transfer
+}

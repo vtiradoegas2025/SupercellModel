@@ -1,14 +1,21 @@
+/**
+ * @file correlation_filter.hpp
+ * @brief Declarations for the chaos module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the chaos runtime and scheme implementations.
+ * This file is part of the src/chaos subsystem.
+ */
+
 #pragma once
 #include <vector>
 #include <complex>
 #include <string>
+#include <memory>
 
 namespace chaos 
 {
 
-//==============================================================================
-// Spatial correlation filters for perturbation fields
-//==============================================================================
 
 /**
  * @brief Base class for spatial correlation filters
@@ -42,7 +49,6 @@ public:
         double dy
     ) 
     {
-        // Default implementation: apply 2D filter to each horizontal slice
         if (field.empty() || field[0].empty() || field[0][0].empty()) 
         {
             return;
@@ -52,28 +58,22 @@ public:
         size_t NTH = field[0].size();
         size_t NZ = field[0][0].size();
 
-        // Iterate over the vertical levels.
         for (size_t k = 0; k < NZ; ++k) 
         {
             std::vector<std::vector<double>> horizontal_slice(NR, std::vector<double>(NTH));
 
-            // Iterate over the horizontal levels.
             for (size_t i = 0; i < NR; ++i) 
             {
-                // Iterate over the horizontal levels.
                 for (size_t j = 0; j < NTH; ++j) 
                 {
                     horizontal_slice[i][j] = static_cast<double>(field[i][j][k]);
                 }
             }
 
-            // Apply 2D filter
             apply_2d(horizontal_slice, dx, dy);
 
-            // Iterate over the horizontal levels to put back the filtered field.
             for (size_t i = 0; i < NR; ++i) 
             {
-                // Iterate over the horizontal levels to put back the filtered field.
                 for (size_t j = 0; j < NTH; ++j) 
                 {
                     field[i][j][k] = static_cast<float>(horizontal_slice[i][j]);
@@ -91,19 +91,32 @@ public:
 /**
  * @brief Spectral Gaussian correlation filter
  *
- * TODO: Re-implement spectral correlation filtering
- * This is a COMEBACK SECTION - SpectralGaussianFilter class was temporarily removed
- * due to vtable compilation issues during initial integration.
- *
- * Full implementation should:
- * 1. Apply Gaussian correlation in spectral space using FFT
- * 2. Correlation function: exp(-0.5 * (k*L)^2) where L is correlation length
- * 3. More accurate than recursive filtering for large correlation scales
- * 4. Handle 2D FFT operations efficiently
- *
- * Technical issue: vtable generation failed during initial compilation
- * Workaround: Using RecursiveGaussianFilter as default
+ * Applies isotropic/anisotropic Gaussian filtering in 2D spectral space:
+ * G(kx, ky) = exp(-0.5 * ((Lx*kx)^2 + (Ly*ky)^2)).
  */
+class SpectralGaussianFilter : public CorrelationFilter
+{
+public:
+    /**
+     * @brief Constructs spectral Gaussian filter with horizontal length scales.
+     */
+    SpectralGaussianFilter(double Lx, double Ly);
+    void apply_2d(std::vector<std::vector<double>>& field, double dx, double dy) override;
+    std::string name() const override { return "spectral_gaussian"; }
+
+private:
+    double Lx_, Ly_;
+    size_t nr_fft_ = 0;
+    size_t nth_fft_ = 0;
+    std::vector<std::complex<double>> spectral_workspace_;
+    std::vector<std::complex<double>> row_workspace_;
+    std::vector<std::complex<double>> col_workspace_;
+
+    /**
+     * @brief Resizes FFT workspaces to match active padded dimensions.
+     */
+    void ensure_workspace(size_t nr_fft, size_t nth_fft);
+};
 
 /**
  * @brief Recursive filter approximation (future implementation)
@@ -114,6 +127,9 @@ public:
 class RecursiveGaussianFilter : public CorrelationFilter 
 {
 public:
+    /**
+     * @brief Constructs recursive Gaussian filter with target length scales.
+     */
     RecursiveGaussianFilter(double Lx, double Ly);
     void apply_2d(std::vector<std::vector<double>>& field, double dx, double dy) override;
     std::string name() const override { return "recursive_gaussian"; }
@@ -122,9 +138,6 @@ private:
     double Lx_, Ly_;
 };
 
-//==============================================================================
-// Factory function for correlation filters
-//==============================================================================
 
 /**
  * @brief Create correlation filter instance
@@ -139,4 +152,4 @@ std::unique_ptr<CorrelationFilter> create_correlation_filter(
     double Ly
 );
 
-} // namespace chaos
+}

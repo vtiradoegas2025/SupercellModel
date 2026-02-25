@@ -1,21 +1,31 @@
+/**
+ * @file tornado.hpp
+ * @brief Declarations for the dynamics module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the dynamics runtime and scheme implementations.
+ * This file is part of the src/dynamics subsystem.
+ */
+
 #pragma once
 #include "dynamics_base.hpp"
 #include <vector>
 
 
-/*This header file contains the declaration of the TornadoScheme class.
-This class implements the tornado scheme.
-It is a subclass of the DynamicsScheme class.
-It implements the compute_momentum_tendencies method.
-It implements the compute_angular_momentum method.
-It implements the compute_vorticity_diagnostics method.
-*/
+/**
+ * @brief Cylindrical-coordinate dynamics scheme for tornado-scale flow.
+ */
 class TornadoScheme : public DynamicsScheme
 {
 public:
+    /**
+     * @brief Constructs a tornado dynamics scheme with default metrics.
+     */
     TornadoScheme();
 
-    // Core momentum tendencies (axisymmetric dynamics)
+    /**
+     * @brief Computes momentum, density, and pressure tendencies.
+     */
     void compute_momentum_tendencies(
         const Field3D& u_r,
         const Field3D& u_theta,
@@ -31,7 +41,9 @@ public:
         Field3D& dp_dt
     ) override;
 
-    // Angular momentum diagnostics (key for tornado spin-up)
+    /**
+     * @brief Computes angular momentum and its local tendency.
+     */
     void compute_angular_momentum(
         const Field3D& u_r,
         const Field3D& u_theta,
@@ -39,7 +51,9 @@ public:
         Field3D& angular_momentum_tendency
     ) override;
 
-    // Axisymmetric vorticity diagnostics
+    /**
+     * @brief Computes vorticity components and budget diagnostics.
+     */
     void compute_vorticity_diagnostics(
         const Field3D& u_r,
         const Field3D& u_theta,
@@ -56,19 +70,25 @@ public:
 
     std::string get_scheme_name() const override { return "tornado"; }
     std::string get_coordinate_system() const override { return "cylindrical"; }
-    int get_num_prognostic_vars() const override { return 5; } // u_r, u_theta, u_z, rho, p
+    int get_num_prognostic_vars() const override { return 5; }
 
 private:
-    // Helper functions for axisymmetric calculations
+    /**
+     * @brief Computes centered radial derivative at one grid point.
+     */
     double compute_dr(const Field3D& field, int i, int j, int k) const;
+    /**
+     * @brief Computes centered vertical derivative at one grid point.
+     */
     double compute_dz(const Field3D& field, int i, int j, int k) const;
 
-    // Radial mass flux diagnostic (for vertical motion)
+    /**
+     * @brief Computes radial mass flux through an annular control volume.
+     */
     double compute_radial_mass_flux(const Field3D& u_r,
                                    const Field3D& rho,
                                    int i, int k) const;
 
-    // Grid parameters
     int NR_, NTH_, NZ_;
     double dr_, dtheta_, dz_;
 };

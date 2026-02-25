@@ -1,3 +1,12 @@
+/**
+ * @file velocity.hpp
+ * @brief Declarations for the radar module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the radar runtime and scheme implementations.
+ * This file is part of the src/radar subsystem.
+ */
+
 #pragma once
 
 #include "radar_base.hpp"
@@ -13,15 +22,19 @@
 class VelocityScheme : public RadarSchemeBase 
 {
 private:
-    // Grid dimensions
     int NR_, NTH_, NZ_;
 
-    // Radar location
     double radar_x_, radar_y_, radar_z_;
 
 public:
+    /**
+     * @brief Initializes velocity operator for active grid and radar geometry.
+     */
     void initialize(const RadarConfig& config, int NR, int NTH, int NZ) override;
 
+    /**
+     * @brief Computes radial velocity outputs for current radar state.
+     */
     void compute(const RadarConfig& config, const RadarStateView& state, RadarOut& out) override;
 
     std::string name() const override { return "velocity"; }
@@ -40,10 +53,9 @@ private:
     void apply_scatterer_correction(const RadarConfig& config, const RadarStateView& state, RadarOut& out);
 
     /**
-     * @brief Estimate terminal fall speed for hydrometeors (simplified)
+     * @brief Estimate terminal fall speed for hydrometeors (bulk approximation)
      *
-     * This is a placeholder - real implementation would use proper fall speed relations
-     * based on particle size, density, etc.
+     * Uses species-dependent bulk relations and clamps to physically plausible ranges.
      */
     float estimate_fall_speed(float q_rain, float q_snow, float q_graupel, float q_hail, float q_ice);
 };

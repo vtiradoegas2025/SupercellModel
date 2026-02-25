@@ -1,9 +1,18 @@
+/**
+ * @file explicit.hpp
+ * @brief Declarations for the numerics module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the numerics runtime and scheme implementations.
+ * This file is part of the src/numerics subsystem.
+ */
+
 #pragma once
 #include "diffusion_base.hpp"
 
-/*This class implements the explicit diffusion scheme.
-It is a subclass of the DiffusionSchemeBase class.
-It implements the compute_diffusion_tendencies method.*/
+/**
+ * @brief Implements the explicit diffusion scheme.
+ */
 class ExplicitDiffusionScheme : public DiffusionSchemeBase 
 {
 private:
@@ -16,43 +25,45 @@ public:
     void initialize() override;
     void initialize(const DiffusionConfig& cfg) override;
 
-    /*This function computes the diffusion tendencies.
-    Takes in the configuration, state, tendencies, and diagnostics 
-    and computes the diffusion tendencies.*/
+    /**
+ * @brief Computes the diffusion tendencies.
+ */
     void compute_diffusion_tendencies(
         const DiffusionConfig& cfg,
         const DiffusionStateView& state,
         DiffusionTendencies& tendencies,
         DiffusionDiagnostics* diag_opt = nullptr) override;
 
-    /*This function checks the stability of the diffusion scheme.
-    Takes in the configuration and state and checks the stability of the diffusion scheme.*/
+    /**
+ * @brief Checks the stability of the diffusion scheme.
+ */
     double check_stability(
         const DiffusionConfig& cfg,
         const DiffusionStateView& state) override;
 
 private:
 
-    /*This function computes the scalar diffusion.
-    Takes in the field, the diffusivity field, the grid, and the tendency 
-    and computes the scalar diffusion.*/
-    // Compute diffusion tendency for a single field
+    /**
+ * @brief Computes the scalar diffusion.
+ */
     void compute_scalar_diffusion(
-        const std::vector<std::vector<std::vector<double>>>& field,
-        const std::vector<std::vector<std::vector<double>>>& K_field,
+        const Field3D& field,
+        const Field3D* K_field,
+        double K_default,
         const GridMetrics& grid,
-        std::vector<std::vector<std::vector<double>>>& tendency);
+        Field3D& tendency);
 
-    /*This function computes the momentum diffusion.
-    Takes in the u, v, w velocities, the diffusivity field, the grid, 
-    and the tendency and computes the momentum diffusion.*/
+    /**
+ * @brief Computes the momentum diffusion.
+ */
     void compute_momentum_diffusion(
-        const std::vector<std::vector<std::vector<double>>>& u,
-        const std::vector<std::vector<std::vector<double>>>& v,
-        const std::vector<std::vector<std::vector<double>>>& w,
-        const std::vector<std::vector<std::vector<double>>>& nu_t,
+        const Field3D& u,
+        const Field3D& v,
+        const Field3D& w,
+        const Field3D* nu_t,
+        double nu_default,
         const GridMetrics& grid,
-        std::vector<std::vector<std::vector<double>>>& du_dt,
-        std::vector<std::vector<std::vector<double>>>& dv_dt,
-        std::vector<std::vector<std::vector<double>>>& dw_dt);
+        Field3D& du_dt,
+        Field3D& dv_dt,
+        Field3D& dw_dt);
 };

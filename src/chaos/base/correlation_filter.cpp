@@ -1,45 +1,246 @@
+/**
+ * @file correlation_filter.cpp
+ * @brief Implementation for the chaos module.
+ *
+ * Provides executable logic for the chaos runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/chaos subsystem.
+ */
+
 #include "correlation_filter.hpp"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
 #include <complex>
+#include <vector>
 
 namespace chaos 
 {
 
-//==============================================================================
-// Utility functions for correlation
-//==============================================================================
+namespace
+{
 
-//==============================================================================
-// SpectralGaussianFilter implementation
-//
-// TODO: Re-implement spectral correlation filtering
-// This is a COMEBACK SECTION - SpectralGaussianFilter implementation was temporarily
-// removed due to vtable compilation issues during initial integration.
-//
-// The removed implementation included:
-// - Constructor: SpectralGaussianFilter(double Lx, double Ly)
-// - apply_2d(): Applied spectral Gaussian filtering using FFT
-// - apply_3d(): Applied filtering to each horizontal slice
-// - create_gaussian_kernel(): Generated spectral filter kernel
-//
-// Technical issue: vtable generation failed, preventing compilation
-// Workaround: Using RecursiveGaussianFilter as default in factory
-//==============================================================================
+constexpr double pi = 3.14159265358979323846;
 
-//==============================================================================
-// RecursiveGaussianFilter implementation (placeholder)
-//==============================================================================
+inline bool is_power_of_two(size_t n)
+{
+    return n > 0 && (n & (n - 1)) == 0;
+}
+
+size_t next_power_of_two(size_t n)
+{
+    if (n <= 1)
+    {
+        return 1;
+    }
+    if (is_power_of_two(n))
+    {
+        return n;
+    }
+    size_t p = 1;
+    while (p < n)
+    {
+        p <<= 1;
+    }
+    return p;
+}
+
+void fft_1d(std::vector<std::complex<double>>& values, bool inverse)
+{
+    const size_t n = values.size();
+    if (n <= 1)
+    {
+        return;
+    }
+
+    for (size_t i = 1, j = 0; i < n; ++i)
+    {
+        size_t bit = n >> 1;
+        while (j & bit)
+        {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j ^= bit;
+        if (i < j)
+        {
+            std::swap(values[i], values[j]);
+        }
+    }
+
+    for (size_t len = 2; len <= n; len <<= 1)
+    {
+        const double angle = 2.0 * pi / static_cast<double>(len) * (inverse ? 1.0 : -1.0);
+        const std::complex<double> w_len(std::cos(angle), std::sin(angle));
+        for (size_t i = 0; i < n; i += len)
+        {
+            std::complex<double> w(1.0, 0.0);
+            for (size_t j = 0; j < len / 2; ++j)
+            {
+                const std::complex<double> u = values[i + j];
+                const std::complex<double> v = values[i + j + len / 2] * w;
+                values[i + j] = u + v;
+                values[i + j + len / 2] = u - v;
+                w *= w_len;
+            }
+        }
+    }
+
+    if (inverse)
+    {
+        const double inv_n = 1.0 / static_cast<double>(n);
+        for (std::complex<double>& value : values)
+        {
+            value *= inv_n;
+        }
+    }
+}
+
+void fft_2d(
+    std::vector<std::complex<double>>& field,
+    size_t nr,
+    size_t nth,
+    bool inverse,
+    std::vector<std::complex<double>>& row_workspace,
+    std::vector<std::complex<double>>& col_workspace
+)
+{
+    if (nr == 0 || nth == 0)
+    {
+        return;
+    }
+    row_workspace.resize(nth);
+    col_workspace.resize(nr);
+
+    for (size_t i = 0; i < nr; ++i)
+    {
+        for (size_t j = 0; j < nth; ++j)
+        {
+            row_workspace[j] = field[i * nth + j];
+        }
+        fft_1d(row_workspace, inverse);
+        for (size_t j = 0; j < nth; ++j)
+        {
+            field[i * nth + j] = row_workspace[j];
+        }
+    }
+
+    for (size_t j = 0; j < nth; ++j)
+    {
+        for (size_t i = 0; i < nr; ++i)
+        {
+            col_workspace[i] = field[i * nth + j];
+        }
+        fft_1d(col_workspace, inverse);
+        for (size_t i = 0; i < nr; ++i)
+        {
+            field[i * nth + j] = col_workspace[i];
+        }
+    }
+}
+
+}
+
+
+SpectralGaussianFilter::SpectralGaussianFilter(double Lx, double Ly)
+    : Lx_(std::max(0.0, Lx)), Ly_(std::max(0.0, Ly))
+{
+}
+
+void SpectralGaussianFilter::ensure_workspace(size_t nr_fft, size_t nth_fft)
+{
+    if (nr_fft_ != nr_fft || nth_fft_ != nth_fft)
+    {
+        nr_fft_ = nr_fft;
+        nth_fft_ = nth_fft;
+        spectral_workspace_.assign(nr_fft_ * nth_fft_, std::complex<double>(0.0, 0.0));
+        row_workspace_.assign(nth_fft_, std::complex<double>(0.0, 0.0));
+        col_workspace_.assign(nr_fft_, std::complex<double>(0.0, 0.0));
+    }
+    else
+    {
+        std::fill(spectral_workspace_.begin(), spectral_workspace_.end(), std::complex<double>(0.0, 0.0));
+    }
+}
+
+/**
+ * @brief Applies the 2D spectral Gaussian correlation filter.
+ */
+void SpectralGaussianFilter::apply_2d(
+    std::vector<std::vector<double>>& field,
+    double dx,
+    double dy
+)
+{
+    if (field.empty() || field[0].empty())
+    {
+        return;
+    }
+
+    const size_t nr = field.size();
+    const size_t nth = field[0].size();
+    for (size_t i = 1; i < nr; ++i)
+    {
+        if (field[i].size() != nth)
+        {
+            return;
+        }
+    }
+
+    const double dx_eff = std::max(dx, 1.0);
+    const double dy_eff = std::max(dy, 1.0);
+    const size_t nr_fft = next_power_of_two(nr);
+    const size_t nth_fft = next_power_of_two(nth);
+
+    ensure_workspace(nr_fft, nth_fft);
+    auto& spectral = spectral_workspace_;
+    for (size_t i = 0; i < nr; ++i)
+    {
+        for (size_t j = 0; j < nth; ++j)
+        {
+            spectral[i * nth_fft + j] = std::complex<double>(field[i][j], 0.0);
+        }
+    }
+
+    fft_2d(spectral, nr_fft, nth_fft, false, row_workspace_, col_workspace_);
+
+    const double domain_x = static_cast<double>(nr_fft) * dx_eff;
+    const double domain_y = static_cast<double>(nth_fft) * dy_eff;
+    for (size_t i = 0; i < nr_fft; ++i)
+    {
+        const int ki = (i <= nr_fft / 2) ? static_cast<int>(i) : static_cast<int>(i) - static_cast<int>(nr_fft);
+        const double kx = 2.0 * pi * static_cast<double>(ki) / domain_x;
+        const double lxkx = Lx_ * kx;
+        for (size_t j = 0; j < nth_fft; ++j)
+        {
+            const int kj = (j <= nth_fft / 2) ? static_cast<int>(j) : static_cast<int>(j) - static_cast<int>(nth_fft);
+            const double ky = 2.0 * pi * static_cast<double>(kj) / domain_y;
+            const double lyky = Ly_ * ky;
+            const double gain = std::exp(-0.5 * (lxkx * lxkx + lyky * lyky));
+            spectral[i * nth_fft + j] *= gain;
+        }
+    }
+
+    fft_2d(spectral, nr_fft, nth_fft, true, row_workspace_, col_workspace_);
+
+    for (size_t i = 0; i < nr; ++i)
+    {
+        for (size_t j = 0; j < nth; ++j)
+        {
+            field[i][j] = spectral[i * nth_fft + j].real();
+        }
+    }
+}
+
 
 RecursiveGaussianFilter::RecursiveGaussianFilter(double Lx, double Ly)
     : Lx_(Lx), Ly_(Ly)
 {
 }
 
-/*This function applies the 2D recursive Gaussian filter.
-Takes in the field, the grid spacing, and the grid spacing
-and applies the 2D recursive Gaussian filter.*/
+/**
+ * @brief Applies the 2D recursive Gaussian filter.
+ */
 void RecursiveGaussianFilter::apply_2d(
     std::vector<std::vector<double>>& field,
     double dx,
@@ -47,15 +248,52 @@ void RecursiveGaussianFilter::apply_2d(
 ) 
 
 {
-    // Placeholder implementation - recursive filter would go here
-    // For now, just return the field unchanged
-    std::cerr << "Warning: RecursiveGaussianFilter not implemented yet, "
-              << "using identity filter" << std::endl;
+    if (field.empty() || field[0].empty())
+    {
+        return;
+    }
+
+    const size_t nr = field.size();
+    const size_t nth = field[0].size();
+
+    const double dx_eff = std::max(dx, 1.0);
+    const double dy_eff = std::max(dy, 1.0);
+    const double lx_eff = std::max(Lx_, dx_eff);
+    const double ly_eff = std::max(Ly_, dy_eff);
+
+    const double wx = std::exp(-dx_eff / lx_eff);
+    const double wy = std::exp(-dy_eff / ly_eff);
+    const int passes = 3;
+
+    for (int pass = 0; pass < passes; ++pass)
+    {
+        for (size_t j = 0; j < nth; ++j)
+        {
+            for (size_t i = 1; i < nr; ++i)
+            {
+                field[i][j] = wx * field[i - 1][j] + (1.0 - wx) * field[i][j];
+            }
+            for (size_t i = nr - 1; i > 0; --i)
+            {
+                field[i - 1][j] = wx * field[i][j] + (1.0 - wx) * field[i - 1][j];
+            }
+        }
+
+        for (size_t i = 0; i < nr; ++i)
+        {
+            std::vector<double>& row = field[i];
+            for (size_t j = 1; j < nth; ++j)
+            {
+                row[j] = wy * row[j - 1] + (1.0 - wy) * row[j];
+            }
+            for (size_t j = nth - 1; j > 0; --j)
+            {
+                row[j - 1] = wy * row[j] + (1.0 - wy) * row[j - 1];
+            }
+        }
+    }
 }
 
-//==============================================================================
-// Factory function
-//==============================================================================
 
 std::unique_ptr<CorrelationFilter> create_correlation_filter(
     const std::string& filter_id,
@@ -63,26 +301,17 @@ std::unique_ptr<CorrelationFilter> create_correlation_filter(
     double Ly
 ) 
 {
-    // TODO: Restore SpectralGaussianFilter support
-    // This is a COMEBACK SECTION - SpectralGaussianFilter temporarily disabled due to compilation issues
-    //
-    // Full implementation should:
-    // 1. Support both "spectral_gaussian" and "recursive_gaussian" filter types
-    // 2. Use spectral filtering as default for better accuracy
-    // 3. Provide fallback to recursive filtering for compatibility
-    //
-    // Current workaround: Always use RecursiveGaussianFilter
-
-    // If recursive Gaussian
-    if (filter_id == "recursive_gaussian") 
+    if (filter_id == "spectral_gaussian")
     {
-        return std::make_unique<RecursiveGaussianFilter>(Lx, Ly);
-    } 
-    else 
+        return std::make_unique<SpectralGaussianFilter>(Lx, Ly);
+    }
+    if (filter_id == "recursive_gaussian")
     {
-        std::cerr << "COMEBACK: SpectralGaussianFilter temporarily disabled - using RecursiveGaussianFilter" << std::endl;
         return std::make_unique<RecursiveGaussianFilter>(Lx, Ly);
     }
+    std::cerr << "Warning: unknown correlation filter '" << filter_id
+              << "', using recursive_gaussian fallback" << std::endl;
+    return std::make_unique<RecursiveGaussianFilter>(Lx, Ly);
 }
 
-} // namespace chaos
+}

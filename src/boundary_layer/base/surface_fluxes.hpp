@@ -1,93 +1,135 @@
+/**
+ * @file surface_fluxes.hpp
+ * @brief Declarations for the boundary_layer module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the boundary_layer runtime and scheme implementations.
+ * This file is part of the src/boundary_layer subsystem.
+ */
+
 #pragma once
 #include <vector>
-#include "../../../include/boundary_layer_base.hpp"
+#include "boundary_layer_base.hpp"
 
-/*This header file contains the base classes and structures for the surface fluxes module.
-The surface fluxes module is responsible for the surface fluxes of the simulation.
-The surface fluxes scheme is chosen by the user in the configuration file.
-This module is used to compute the surface fluxes of the simulation.*/
 
-// Surface layer and flux utilities for boundary layer schemes
 namespace surface_fluxes 
 {
 
-// Bulk aerodynamic surface flux computation
+/**
+ * @brief Bulk aerodynamic surface flux outputs.
+ */
 struct BulkFluxes 
 {
-    double ustar = 0.0;     // friction velocity [m/s]
-    double tau_u = 0.0;     // zonal momentum stress [Pa]
-    double tau_v = 0.0;     // meridional momentum stress [Pa]
-    double H = 0.0;         // sensible heat flux [W/m²]
-    double E = 0.0;         // moisture flux [kg/m²/s]
-    double Cd = 0.0;        // drag coefficient
-    double Ch = 0.0;        // heat transfer coefficient
-    double Ce = 0.0;        // moisture transfer coefficient
+    double ustar = 0.0;
+    double tau_u = 0.0;
+    double tau_v = 0.0;
+    double H = 0.0;
+    double E = 0.0;
+    double Cd = 0.0;
+    double Ch = 0.0;
+    double Ce = 0.0;
 };
 
-// Compute bulk aerodynamic surface fluxes
+/**
+ * @brief Computes surface fluxes using bulk transfer coefficients.
+ */
 BulkFluxes compute_bulk_fluxes(
     const SurfaceConfig& sfc_cfg,
-    double u_sfc,           // surface zonal wind [m/s]
-    double v_sfc,           // surface meridional wind [m/s]
-    double theta_sfc,       // surface potential temperature [K]
-    double qv_sfc,          // surface water vapor [kg/kg]
-    double theta_air,       // air potential temperature [K]
-    double qv_air,          // air water vapor [kg/kg]
-    double p_air,           // air pressure [Pa]
-    double rho_air,         // air density [kg/m³]
-    double z_sfc            // height of measurement [m]
+    double u_sfc,
+    double v_sfc,
+    double theta_sfc,
+    double qv_sfc,
+    double theta_air,
+    double qv_air,
+    double p_air,
+    double rho_air,
+    double z_sfc,
+    double min_ustar = 1.0e-4
 );
 
-// Monin-Obukhov similarity theory surface fluxes (WRF-style)
-// Based on Jiménez et al. (2012, MWR)
+/**
+ * @brief Monin-Obukhov surface flux outputs and stability diagnostics.
+ */
 struct MoninObukhovFluxes 
 {
-    double ustar = 0.0;     // friction velocity [m/s]
-    double tau_u = 0.0;     // zonal momentum stress [Pa]
-    double tau_v = 0.0;     // meridional momentum stress [Pa]
-    double H = 0.0;         // sensible heat flux [W/m²]
-    double E = 0.0;         // moisture flux [kg/m²/s]
-    double L = 0.0;         // Obukhov length [m]
-    double zeta = 0.0;      // stability parameter z/L
-    double Cd = 0.0;        // drag coefficient
-    double Ch = 0.0;        // heat transfer coefficient
-    double Ce = 0.0;        // moisture transfer coefficient
+    double ustar = 0.0;
+    double tau_u = 0.0;
+    double tau_v = 0.0;
+    double H = 0.0;
+    double E = 0.0;
+    double L = 0.0;
+    double zeta = 0.0;
+    double Cd = 0.0;
+    double Ch = 0.0;
+    double Ce = 0.0;
 };
 
+/**
+ * @brief Computes fluxes using Monin-Obukhov similarity theory.
+ */
 MoninObukhovFluxes compute_monin_obukhov_fluxes(
     const SurfaceConfig& sfc_cfg,
-    double u_sfc,           // surface zonal wind [m/s]
-    double v_sfc,           // surface meridional wind [m/s]
-    double theta_sfc,       // surface potential temperature [K]
-    double qv_sfc,          // surface water vapor [kg/kg]
-    double theta_air,       // air potential temperature [K]
-    double qv_air,          // air water vapor [kg/kg]
-    double p_air,           // air pressure [Pa]
-    double rho_air,         // air density [kg/m³]
-    double z_sfc            // height of measurement [m]
+    double u_sfc,
+    double v_sfc,
+    double theta_sfc,
+    double qv_sfc,
+    double theta_air,
+    double qv_air,
+    double p_air,
+    double rho_air,
+    double z_sfc,
+    double min_ustar = 1.0e-4
 );
 
-// Stability functions for Monin-Obukhov theory
-double psi_m(double zeta);  // momentum stability function
-double psi_h(double zeta);  // heat stability function
+/**
+ * @brief Dispatches the configured surface-flux formulation.
+ */
+BulkFluxes compute_surface_fluxes(
+    const BoundaryLayerConfig& bl_cfg,
+    const SurfaceConfig& sfc_cfg,
+    double u_sfc,
+    double v_sfc,
+    double theta_sfc,
+    double qv_sfc,
+    double theta_air,
+    double qv_air,
+    double p_air,
+    double rho_air,
+    double z_sfc
+);
 
-// Bulk Richardson number computation
+/**
+ * @brief Stability correction function for momentum.
+ */
+double psi_m(double zeta);
+/**
+ * @brief Stability correction function for heat and moisture.
+ */
+double psi_h(double zeta);
+
+/**
+ * @brief Computes bulk Richardson number between surface and first model level.
+ */
 double bulk_richardson_number(
-    double theta_sfc,       // surface potential temperature [K]
-    double theta_air,       // air potential temperature [K]
-    double u_sfc,           // surface zonal wind [m/s]
-    double v_sfc,           // surface meridional wind [m/s]
-    double z_sfc            // height [m]
+    double theta_sfc,
+    double theta_air,
+    double u_sfc,
+    double v_sfc,
+    double z_sfc
 );
 
-// Virtual potential temperature
+/**
+ * @brief Computes virtual potential temperature from theta and qv.
+ */
 double virtual_potential_temperature(double theta, double qv);
 
-// Convert between theta and T tendencies (for coupling)
+/**
+ * @brief Converts theta tendency to temperature tendency along a profile.
+ */
 void convert_theta_tendency_to_temperature(
     const std::vector<double>& dthetadt,
     const std::vector<double>& theta,
     const std::vector<double>& p,
     std::vector<double>& dTdt
 );
-} // namespace surface_fluxes
+}

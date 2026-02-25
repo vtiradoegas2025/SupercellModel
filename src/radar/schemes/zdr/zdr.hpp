@@ -1,6 +1,17 @@
+/**
+ * @file zdr.hpp
+ * @brief Declarations for the radar module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the radar runtime and scheme implementations.
+ * This file is part of the src/radar subsystem.
+ */
+
 #pragma once
 
 #include "radar_base.hpp"
+#include <algorithm>
+#include <cmath>
 
 /**
  * @brief Differential reflectivity radar scheme
@@ -13,12 +24,17 @@
 class ZDRScheme : public RadarSchemeBase 
 {
 private:
-    // Grid dimensions
     int NR_, NTH_, NZ_;
 
 public:
+    /**
+     * @brief Initializes ZDR operator for active grid dimensions.
+     */
     void initialize(const RadarConfig& config, int NR, int NTH, int NZ) override;
 
+    /**
+     * @brief Computes differential-reflectivity outputs for current state.
+     */
     void compute(const RadarConfig& config, const RadarStateView& state, RadarOut& out) override;
 
     std::string name() const override { return "zdr"; }
@@ -75,6 +91,12 @@ private:
      */
     static float dbz_to_linear(float Z_dbz) 
     {
-        return std::pow(10.0f, Z_dbz / 10.0f);
+        if (!std::isfinite(static_cast<double>(Z_dbz)))
+        {
+            return 0.0f;
+        }
+        const float clamped_dbz = std::clamp(Z_dbz, -40.0f, 100.0f);
+        const float linear = std::pow(10.0f, clamped_dbz / 10.0f);
+        return std::isfinite(static_cast<double>(linear)) ? linear : 0.0f;
     }
 };

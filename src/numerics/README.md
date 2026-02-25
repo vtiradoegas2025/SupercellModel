@@ -1,285 +1,102 @@
-# Numerical Methods Module
+# Numerics Module
 
-This module provides the core numerical algorithms for spatial discretization and time integration in the atmospheric simulation framework.
+This module provides the numerical kernels used by the simulation runtime and is wired through `src/core/numerics.cpp`.
 
-## Overview
+## Current Runtime Integration
 
-The numerics module implements:
-- **Spatial discretization**: Finite-difference and interpolation operators
-- **Advection schemes**: Conservative transport of scalar fields
-- **Diffusion operators**: Explicit and implicit Laplacian solvers
-- **Time integration**: Runge-Kutta methods with stability monitoring
-- **Grid operations**: Interpolation and boundary condition handling
+Numerics components are initialized once by:
+- `src/core/tornado_sim.cpp` -> `initialize_numerics()`
 
-## Architecture
+Numerics components are consumed at runtime by:
+- `src/advection/advection.cpp`
+  - Uses numerics advection schemes for the vertical split step (`z`) when active scheme is `tvd` or `weno5`.
+  - Radial and azimuthal transport (`r`, `theta`) still use advection module kernels.
+- `src/core/dynamics.cpp`
+  - Applies numerics diffusion tendencies (`explicit` or `implicit`) to momentum/scalars.
+- `src/core/headless_runtime.cpp`
+- `src/core/gui.cpp`
+  - Both use `choose_runtime_timestep()` to enforce numerics stability caps.
 
-```
+## Directory Layout
+
+```text
 src/numerics/
-├── numerics.cpp              # Module coordinator
-├── base/                     # Common utilities (empty)
-├── advection/                # Scalar transport schemes
-│   ├── factory.cpp/.hpp      # Advection scheme factory
+├── advection/
+│   ├── factory.cpp/.hpp
 │   └── schemes/
-│       ├── tvd/              # Total Variation Diminishing
-│       └── weno5/            # Weighted Essentially Non-Oscillatory
-├── diffusion/                # Laplacian operators
-│   ├── factory.cpp/.hpp      # Diffusion scheme factory
+│       ├── tvd/
+│       └── weno5/
+├── diffusion/
+│   ├── factory.cpp/.hpp
 │   └── schemes/
-│       ├── explicit/         # Forward Euler diffusion
-│       └── implicit/         # Crank-Nicolson implicit
-└── time_stepping/            # Time integration methods
-    ├── factory.cpp/.hpp      # Time stepping factory
-    └── schemes/
-        ├── rk3/              # 3rd-order Runge-Kutta
-        └── rk4/              # 4th-order Runge-Kutta
+│       ├── explicit/
+│       └── implicit/
+├── time_stepping/
+│   ├── factory.cpp/.hpp
+│   └── schemes/
+│       ├── rk3/
+│       └── rk4/
+└── README.md
 ```
 
-## Spatial Discretization
+## Scheme Behavior
 
-### Grid Geometry
+### Advection
+- Implementations: `tvd`, `weno5`
+- Scope today: computes vertical 1D tracer tendencies (`dqdt_adv`) used by the `z` split step.
+- Includes CFL diagnostics and suggested timestep estimates.
+- Positivity protection is applied as a tendency limiter (limits `dqdt` so `q + dt*dqdt >= floor`).
 
-**Cylindrical coordinates** (r, θ, z):
-```cpp
-// Coordinate arrays
-r[i] = i * dr + r_min;              // Radial coordinate
-theta[j] = j * dtheta;              // Azimuthal coordinate
-z[k] = k * dz + z_min;              // Vertical coordinate
+### Diffusion
+- Implementations: `explicit`, `implicit`
+- Scope today: vertical diffusion tendencies for momentum and scalar fields.
+- `explicit` uses flux-form tendencies and now uses the physically diffusive sign convention.
+- `implicit` uses a tridiagonal solve in the vertical (Crank-Nicolson style) and derives tendencies from updated state.
+- Variable diffusivity fields are supported and sanitized to non-negative finite values at use sites.
 
-// Grid spacings
-dr = (r_max - r_min) / (NR - 1);    // Radial spacing
-dtheta = 2 * M_PI / NTH;            // Azimuthal spacing
-dz = (z_max - z_min) / (NZ - 1);    // Vertical spacing
-```
+### Time Stepping
+- Implementations: `rk3`, `rk4`
+- `rk3` is implemented as a 3-stage SSPRK3 update in the numerics class.
+- In current app wiring, global model stepping is handled in dynamics; numerics time-stepping schemes are currently used for timestep guidance (`suggest_dt`) rather than owning the full prognostic state integration loop.
 
-**Staggering**: Lorenz grid (thermodynamics at cell centers, momentum at faces)
+## Runtime Timestep Guardrails
 
-### Differential Operators
+`choose_runtime_timestep()` in `src/core/numerics.cpp` applies:
+- Config bounds: `dt_min`, `dt_max`
+- Advection cap: based on max resolved flow speed and grid spacing
+- Explicit diffusion cap: based on `K_h`, `K_v`, and grid spacing
 
-**Gradient operators:**
-```cpp
-// Central differences
-∂ψ/∂r |_{i,j,k} = (ψ_{i+1,j,k} - ψ_{i-1,j,k}) / (2 dr)
-∂ψ/∂θ |_{i,j,k} = (ψ_{i,j+1,k} - ψ_{i,j-1,k}) / (2 r dtheta)
-∂ψ/∂z |_{i,j,k} = (ψ_{i,j,k+1} - ψ_{i,j,k-1}) / (2 dz)
-```
-
-**Laplacian operator:**
-```cpp
-∇²ψ |_{i,j,k} = ∂²ψ/∂r² + (1/r)∂ψ/∂r + (1/r²)∂²ψ/∂θ² + ∂²ψ/∂z²
-```
-
-## Advection Schemes
-
-### Total Variation Diminishing (TVD)
-
-**Monotonic upstream-centered scheme for conservation laws** (van Leer, 1977):
-
-**1D advection equation:**
-```cpp
-∂ψ/∂t + u ∂ψ/∂x = 0
-```
-
-**TVD discretization:**
-```cpp
-ψ_i^{n+1} = ψ_i^n - (Δt/Δx) [F_{i+1/2} - F_{i-1/2}]
-```
-
-Where F_{i+1/2} is the numerical flux using limiter functions.
-
-**Limiter functions:**
-- **minmod**: ϕ(r) = max(0, min(1, r))
-- **van Leer**: ϕ(r) = (r + |r|) / (1 + |r|)
-- **superbee**: ϕ(r) = max(0, min(2r, 1), min(r, 2))
-
-### Weighted Essentially Non-Oscillatory (WENO5)
-
-**5th-order accurate scheme** for smooth regions with shock capturing:
-
-**WENO reconstruction** (Jiang & Shu, 1996):
-```cpp
-// Candidate stencils
-q^{(0)} = (2/6)ψ_{i-2} - (7/6)ψ_{i-1} + (11/6)ψ_i
-q^{(1)} = (-1/6)ψ_{i-1} + (5/6)ψ_i + (2/6)ψ_{i+1}
-q^{(2)} = (2/6)ψ_i + (5/6)ψ_{i+1} - (1/6)ψ_{i+2}
-
-// Nonlinear weights
-ω_k = α_k / ∑ α_m,    α_k = γ_k / (ε + β_k)²
-
-// Final reconstruction
-ψ_{i+1/2} = ∑ ω_k q^{(k)}
-```
-
-**Smoothness indicators** β_k detect discontinuities and reduce weights accordingly.
-
-## Diffusion Schemes
-
-### Explicit Laplacian
-
-**Forward Euler time integration:**
-```cpp
-ψ^{n+1} = ψ^n + Δt κ ∇²ψ^n
-```
-
-**Stability condition:** Δt ≤ (Δx²)/(2d κ) where d is dimensionality
-
-### Implicit Crank-Nicolson
-
-**Second-order accurate implicit scheme:**
-```cpp
-ψ^{n+1} - ψ^n = (Δt/2) κ [∇²ψ^{n+1} + ∇²ψ^n]
-```
-
-**Resulting system:** A ψ^{n+1} = ψ^n where A = I - (Δt/2)κ ∇²
-
-**Solution method:** Successive over-relaxation (SOR) or conjugate gradient
-
-## Time Integration
-
-### Runge-Kutta Methods
-
-**3rd-order TVD RK3** (Shu & Osher, 1988):
-```cpp
-u^{(1)} = u^n + Δt L(u^n)
-u^{(2)} = (3/4)u^n + (1/4)u^{(1)} + (1/4)Δt L(u^{(1)})
-u^{n+1} = (1/3)u^n + (2/3)u^{(2)} + (2/3)Δt L(u^{(2)})
-```
-
-**4th-order classical RK4:**
-```cpp
-k₁ = Δt L(u^n)
-k₂ = Δt L(u^n + k₁/2)
-k₃ = Δt L(u^n + k₂/2)
-k₄ = Δt L(u^n + k₃)
-u^{n+1} = u^n + (k₁ + 2k₂ + 2k₃ + k₄)/6
-```
-
-### CFL Monitoring
-
-**Courant-Friedrichs-Lewy condition:**
-```cpp
-CFL = Δt * max(|u|/Δx + |v|/Δy + |w|/Δz) ≤ 1.0
-```
-
-**Adaptive time stepping:**
-```cpp
-Δt_new = min(Δt_max, CFL_target * Δx / max_speed)
-```
+It enforces caps even when adaptive dt is disabled (as a stability guardrail).
 
 ## Configuration
 
-### Advection Settings
-```yaml
-numerics:
-  advection:
-    scheme: "weno5"       # tvd, weno5
-    limiter: "van_leer"   # minmod, van_leer, superbee (TVD only)
-    order: 5              # 3 or 5 (WENO)
-```
+Typical YAML usage:
 
-### Diffusion Settings
 ```yaml
 numerics:
+  advection: weno5
   diffusion:
-    scheme: "explicit"    # explicit, implicit
-    kappa_max: 100.0      # Maximum diffusion coefficient
-    tolerance: 1e-6       # Implicit solver tolerance
-    max_iterations: 100   # Maximum solver iterations
+    scheme: explicit
+    apply_to: all
+    K_h: 20.0
+    K_v: 10.0
+  time_stepping: rk3
 ```
 
-### Time Stepping Settings
-```yaml
-numerics:
-  time_stepping:
-    scheme: "rk3"         # rk3, rk4
-    cfl_target: 0.5       # Target CFL number
-    dt_min: 0.01          # Minimum time step (s)
-    dt_max: 10.0          # Maximum time step (s)
-```
+Factory name parsing is canonicalized (case-insensitive; ignores `_`, `-`, and spaces), so variants like `SSP-RK3` are accepted for time stepping.
 
-## Implementation Details
+## Final Check Status
 
-### Boundary Conditions
+Final numerics verification was run with:
+- `make -j4 bin/tornado_sim`
+- `bash tests/test_guards.sh`
+- Headless smoke run: TVD + explicit diffusion + SSP-RK3
+- Headless smoke run: WENO5 + implicit diffusion + RK4
 
-**Radial boundaries:**
-```cpp
-// Reflective (walls)
-ψ[0] = ψ[1]      // Zero-gradient
-u[0] = -u[1]     // Reflective
+All checks above completed successfully.
 
-// Periodic (azimuthal)
-ψ[NTH] = ψ[0]    // Continuity
-```
+## Known Limitations
 
-**Vertical boundaries:**
-```cpp
-// Bottom: free-slip
-w[0] = 0
-∂u/∂z|₀ = 0
-
-// Top: Rayleigh damping
-τ(z) = τ₀ exp(-((z-z_damp)/H_damp)²)
-```
-
-### Parallel Considerations
-
-**Domain decomposition:**
-- Radial direction: Natural for cylindrical geometry
-- Azimuthal direction: Periodic boundaries
-- Vertical direction: Surface/top boundary handling
-
-**Ghost cell exchange:**
-- MPI communication for multi-domain simulations
-- Halo updates for finite-difference stencils
-
-### Performance Optimization
-
-**Cache-efficient data layouts:**
-```cpp
-// Array ordering: field[r][theta][z]
-std::vector<std::vector<std::vector<float>>> psi(NR,
-    std::vector<std::vector<float>>(NTH,
-        std::vector<float>(NZ)));
-```
-
-**SIMD vectorization:**
-- Inner loops optimized for AVX/AVX-512
-- Structure-of-arrays for vector operations
-
-## Validation and Testing
-
-### Numerical Accuracy Tests
-```bash
-# Test advection schemes
-python tests/test_advection.py --scheme weno5 --case solid_body_rotation
-
-# Validate diffusion operators
-python tests/test_diffusion.py --scheme implicit --grid 64x64x64
-```
-
-### Convergence Studies
-- **Order verification**: Error vs. resolution scaling
-- **Conservation properties**: Mass, momentum, energy conservation
-- **Stability analysis**: Eigenvalue analysis of linearized operators
-
-### Benchmark Results
-- **TVD scheme**: 2nd-order accurate, monotonic
-- **WENO5 scheme**: 5th-order accurate in smooth regions
-- **RK3**: 3rd-order time accuracy, TVD stable
-- **Implicit diffusion**: Unconditionally stable, 2nd-order accurate
-
-## Scientific References
-
-### Advection Schemes
-- Godunov (1959) - Finite-difference methods for shock waves
-- van Leer (1979) - Towards the ultimate conservative difference scheme
-- Jiang & Shu (1996) - Efficient implementation of WENO schemes
-
-### Time Integration
-- Shu & Osher (1988) - Efficient implementation of essentially non-oscillatory schemes
-- Williamson (1980) - Low-storage Runge-Kutta schemes
-
-### Numerical Methods
-- Durran (2010) - Numerical Methods for Fluid Dynamics
-- Wicker & Skamarock (2002) - Time-splitting methods for compressible models
-
-This module provides the numerical foundation for accurate and stable atmospheric simulations.
+- Numerics advection currently covers the vertical split step only; `r/theta` transport remains in advection module kernels.
+- Diffusion kernels are currently vertical-focused in both explicit and implicit schemes.
+- Numerics RK classes are not yet the main driver of the global prognostic integration path.

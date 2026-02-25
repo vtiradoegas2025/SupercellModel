@@ -1,5 +1,5 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -O3 -march=native -mtune=native -I include
+CXXFLAGS := -std=c++17 -O3 -march=native -mtune=native -I include -I src
 # Detect OpenMP support - handle both g++ and clang++
 # On macOS, g++ is actually clang++, so check for libomp
 # Try to find libomp via brew
@@ -46,7 +46,7 @@ ifeq ($(LIBOMP_PATH),)
     OPENMP_LIB :=
   endif
 endif
-LDLIBS += $(OPENMP_LIB)
+OPENMP_LDLIBS := $(OPENMP_LIB)
 # Optional: uncomment to see vectorization reports
 # CXXFLAGS += -ftree-vectorize -fopt-info-vec
 # Optional GUI (SFML) support; default off
@@ -57,14 +57,19 @@ EXPORT_NPY ?= 1
 ifeq ($(EXPORT_NPY),1)
   CXXFLAGS += -DEXPORT_NPY
 endif
-SRCS := src/equations.cpp src/dynamics.cpp src/tornado_sim.cpp src/radiation.cpp src/boundary_layer.cpp src/turbulence.cpp src/numerics.cpp src/simd_utils.cpp \
+VALIDATION_SRCS := src/validation/field_contract.cpp src/validation/field_validation.cpp
+SRCS := src/core/equations.cpp src/core/dynamics.cpp src/core/tornado_sim.cpp src/core/headless_runtime.cpp src/core/runtime_config.cpp src/core/radiation.cpp src/core/boundary_layer.cpp src/core/turbulence.cpp src/core/numerics.cpp src/core/simd_utils.cpp \
          src/advection/advection.cpp \
-         src/radar.cpp \
+         src/core/radar.cpp \
          src/radar/base/radar_base.cpp \
          src/radar/factory.cpp \
          src/radar/schemes/reflectivity/reflectivity.cpp \
          src/radar/schemes/velocity/velocity.cpp \
          src/radar/schemes/zdr/zdr.cpp \
+         src/soundings/soundings.cpp \
+         src/soundings/factory.cpp \
+         src/soundings/base/soundings_base.cpp \
+         src/soundings/schemes/sharpy/sharpy_sounding.cpp \
          src/microphysics/base/thermodynamics.cpp \
          src/microphysics/factory.cpp \
          src/microphysics/schemes/kessler/kessler.cpp \
@@ -104,14 +109,19 @@ SRCS := src/equations.cpp src/dynamics.cpp src/tornado_sim.cpp src/radiation.cpp
          src/chaos/schemes/initial_conditions/initial_conditions.cpp \
          src/chaos/schemes/boundary_layer/boundary_layer.cpp \
          src/chaos/schemes/full_stochastic/full_stochastic.cpp \
-         src/terrain.cpp \
+         src/core/terrain.cpp \
          src/terrain/base/topography.cpp \
          src/terrain/factory.cpp \
          src/terrain/schemes/bell/bell.cpp \
          src/terrain/schemes/schar/schar.cpp \
-         src/terrain/schemes/none.cpp
+         src/terrain/schemes/none.cpp \
+         $(VALIDATION_SRCS)
+FIELD_VALIDATOR_SRCS := src/tools/field_validator.cpp $(VALIDATION_SRCS) vulkan/src/npy_reader.cpp
+RADIATION_REGRESSION_SRCS := tests/radiation_regression.cpp src/radiation/base/radiative_transfer.cpp
+SOUNDINGS_REGRESSION_SRCS := tests/test_soundings.cpp src/soundings/base/soundings_base.cpp src/soundings/factory.cpp src/soundings/schemes/sharpy/sharpy_sounding.cpp
+TERRAIN_REGRESSION_SRCS := tests/terrain_regression.cpp src/core/terrain.cpp src/terrain/base/topography.cpp src/terrain/factory.cpp src/terrain/schemes/bell/bell.cpp src/terrain/schemes/schar/schar.cpp src/terrain/schemes/none.cpp
 CPPFLAGS :=
-LDLIBS :=
+LDLIBS := $(OPENMP_LDLIBS)
 ifeq ($(GUI),1)
   # Detect SFML via pkg-config if available; fallback to Homebrew prefix
   PKG_CONFIG := $(shell command -v pkg-config 2>/dev/null)
@@ -125,21 +135,68 @@ ifeq ($(GUI),1)
   endif
   CPPFLAGS += $(SFML_CFLAGS) -DENABLE_GUI=1
   LDLIBS += $(SFML_LIBS)
-  SRCS += src/gui.cpp
+  SRCS += src/core/gui.cpp
 endif
 BIN := bin/tornado_sim
+FIELD_VALIDATOR := bin/field_validator
+RADIATION_REGRESSION_BIN := bin/radiation_regression_test
+SOUNDINGS_REGRESSION_BIN := bin/soundings_regression_test
+TERRAIN_REGRESSION_BIN := bin/terrain_regression_test
 
 $(BIN): $(SRCS) | bin
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(SRCS) $(LDLIBS) -o $(BIN)
 
+$(FIELD_VALIDATOR): $(FIELD_VALIDATOR_SRCS) | bin
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -I vulkan/include $(FIELD_VALIDATOR_SRCS) $(LDLIBS) -o $(FIELD_VALIDATOR)
+
+$(RADIATION_REGRESSION_BIN): $(RADIATION_REGRESSION_SRCS) | bin
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(RADIATION_REGRESSION_SRCS) $(LDLIBS) -o $(RADIATION_REGRESSION_BIN)
+
+$(SOUNDINGS_REGRESSION_BIN): $(SOUNDINGS_REGRESSION_SRCS) | bin
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(SOUNDINGS_REGRESSION_SRCS) $(LDLIBS) -o $(SOUNDINGS_REGRESSION_BIN)
+
+$(TERRAIN_REGRESSION_BIN): $(TERRAIN_REGRESSION_SRCS) | bin
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(TERRAIN_REGRESSION_SRCS) $(LDLIBS) -o $(TERRAIN_REGRESSION_BIN)
+
 bin:
 	mkdir -p bin
 
-.PHONY: run clean
+.PHONY: run clean clean-vulkan vulkan run-vulkan legacy validate-fields test-guards test-backend-physics test-radiation-regression test-soundings test-terrain-regression test
 run: $(BIN)
 	./$(BIN)
 
+vulkan:
+	$(MAKE) -C vulkan
+
+run-vulkan: vulkan
+	./bin/vulkan_viewer --dry-run
+
+validate-fields: $(FIELD_VALIDATOR)
+	./$(FIELD_VALIDATOR) --input data/exports --contract cm1 --mode report --json data/exports/validation_dataset_report.json
+
+test-guards: $(BIN) $(FIELD_VALIDATOR)
+	bash ./tests/test_guards.sh
+
+test-backend-physics: $(BIN) $(FIELD_VALIDATOR)
+	bash ./tests/test_backend_physics.sh
+
+test-radiation-regression: $(RADIATION_REGRESSION_BIN)
+	bash ./tests/test_radiation_regression.sh
+
+test-soundings: $(SOUNDINGS_REGRESSION_BIN)
+	./$(SOUNDINGS_REGRESSION_BIN)
+
+test-terrain-regression: $(TERRAIN_REGRESSION_BIN)
+	./$(TERRAIN_REGRESSION_BIN)
+
+test: test-guards test-radiation-regression test-terrain-regression
+
+clean-vulkan:
+	$(MAKE) -C vulkan clean
+
 clean:
-	rm -f $(BIN)
+	rm -f $(BIN) $(FIELD_VALIDATOR) $(RADIATION_REGRESSION_BIN) $(SOUNDINGS_REGRESSION_BIN) $(TERRAIN_REGRESSION_BIN)
+	@$(MAKE) -C vulkan clean >/dev/null 2>&1 || true
 
-
+legacy:
+	@echo "Legacy modules are archived under ./legacy"

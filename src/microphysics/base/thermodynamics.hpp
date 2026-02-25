@@ -1,189 +1,264 @@
+/**
+ * @file thermodynamics.hpp
+ * @brief Declarations for the microphysics module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the microphysics runtime and scheme implementations.
+ * This file is part of the src/microphysics subsystem.
+ */
+
 #pragma once
 #include <vector>
+#include <algorithm>
 #include <cmath>
-#include "../../../include/microphysics_base.hpp"
-#include "../../../include/field3d.hpp"
+#include "microphysics_base.hpp"
+#include "field3d.hpp"
 
-/*This namespace contains the thermodynamics utilities for the microphysics schemes.
-This namespace contains the theta_to_temperature, temperature_to_theta, 
-saturation_vapor_pressure_water, saturation_vapor_pressure_ice, saturation_mixing_ratio_water, 
-saturation_mixing_ratio_ice, relative_humidity, latent_heat_vaporization, virtual_temperature, 
-air_density, temperature_tendency_to_theta, and saturation_adjustment 
-functions.*/
+/**
+ * @brief Thermodynamic conversions and moist-air utility functions.
+ */
 namespace thermodynamics 
 {
 
-/*This function converts the potential temperature to the temperature.
-Takes in the potential temperature and the pressure
-and converts the potential temperature to the temperature.*/
+/**
+ * @brief Converts the potential temperature to the temperature.
+ */
 inline double theta_to_temperature(double theta, double p) 
 {
     using namespace microphysics_constants;
-    double kappa = R_d / cp;
-    return theta * pow(p / p0, kappa);
+    if (!std::isfinite(theta) || !std::isfinite(p))
+    {
+        return T0;
+    }
+    const double theta_safe = std::clamp(theta, 150.0, 500.0);
+    const double p_safe = std::clamp(p, 100.0, 200000.0);
+    double kappa = microphysics_constants::R_d / microphysics_constants::cp;
+    const double T = theta_safe * std::pow(p_safe / microphysics_constants::p0, kappa);
+    return std::isfinite(T) ? T : T0;
 }
 
 
-/*This function converts the temperature to the potential temperature.
-Takes in the temperature and the pressure
-and converts the temperature to the potential temperature.*/
+/**
+ * @brief Converts the temperature to the potential temperature.
+ */
 inline double temperature_to_theta(double T, double p) 
 {
     using namespace microphysics_constants;
-    double kappa = R_d / cp;
-    return T * pow(p0 / p, kappa);
+    if (!std::isfinite(T) || !std::isfinite(p))
+    {
+        return 300.0;
+    }
+    const double T_safe = std::clamp(T, 150.0, 400.0);
+    const double p_safe = std::clamp(p, 100.0, 200000.0);
+    double kappa = microphysics_constants::R_d / microphysics_constants::cp;
+    const double theta = T_safe * std::pow(microphysics_constants::p0 / p_safe, kappa);
+    return std::isfinite(theta) ? theta : 300.0;
 }
 
-/*This function computes the saturation vapor pressure over water.
-Takes in the temperature and computes the saturation vapor pressure
-over water.*/
+/**
+ * @brief Computes the saturation vapor pressure over water.
+ */
 inline double saturation_vapor_pressure_water(double T) 
 {
     using namespace microphysics_constants;
-    double T_c = T - T0;  // Celsius
+    if (!std::isfinite(T))
+    {
+        return 0.0;
+    }
+    T = std::clamp(T, 150.0, 400.0);
+    double T_c = T - T0;
 
-    // If the temperature is greater than or equal to the freezing temperature, compute the saturation vapor pressure over water.
     if (T >= T0) 
     {
-        // Over water
-        return 611.21 * exp((18.678 - T_c/234.5) * T_c / (257.14 + T_c));
+        const double value = 611.21 * std::exp((18.678 - T_c/234.5) * T_c / (257.14 + T_c));
+        return std::isfinite(value) ? std::max(0.0, value) : 0.0;
     } 
     else 
     {
-        // Over ice (use ice formula below freezing)
-        return 611.15 * exp((23.036 - T_c/333.7) * T_c / (279.82 + T_c));
+        const double value = 611.15 * std::exp((23.036 - T_c/333.7) * T_c / (279.82 + T_c));
+        return std::isfinite(value) ? std::max(0.0, value) : 0.0;
     }
 }
 
-/*This function computes the saturation vapor pressure over ice.
-Takes in the temperature and computes the saturation vapor pressure over ice.*/
+/**
+ * @brief Computes the saturation vapor pressure over ice.
+ */
 inline double saturation_vapor_pressure_ice(double T) 
 {
     using namespace microphysics_constants;
-    double T_c = T - T0;  // Celsius
-    return 611.15 * exp((23.036 - T_c/333.7) * T_c / (279.82 + T_c));
+    if (!std::isfinite(T))
+    {
+        return 0.0;
+    }
+    T = std::clamp(T, 150.0, 400.0);
+    double T_c = T - T0;
+    const double value = 611.15 * std::exp((23.036 - T_c/333.7) * T_c / (279.82 + T_c));
+    return std::isfinite(value) ? std::max(0.0, value) : 0.0;
 }
 
-/*This function computes the saturation mixing ratio over water.
-Takes in the temperature and the pressure
-and computes the saturation mixing ratio over water.*/
+/**
+ * @brief Computes the saturation mixing ratio over water.
+ */
 inline double saturation_mixing_ratio_water(double T, double p) 
 {
     using namespace microphysics_constants;
     double e_sat = saturation_vapor_pressure_water(T);
-    return 0.62198 * e_sat / (p - e_sat);
+    if (!std::isfinite(e_sat) || !std::isfinite(p))
+    {
+        return 0.0;
+    }
+    const double p_safe = std::clamp(p, 100.0, 200000.0);
+    const double denom = std::max(p_safe - e_sat, 1.0);
+    const double qvs = 0.62198 * e_sat / denom;
+    return std::clamp(qvs, 0.0, 0.2);
 }
 
 
-/*This function computes the saturation mixing ratio over ice.
-Takes in the temperature and the pressure
-and computes the saturation mixing ratio over ice.*/
+/**
+ * @brief Computes the saturation mixing ratio over ice.
+ */
 inline double saturation_mixing_ratio_ice(double T, double p) 
 {
     using namespace microphysics_constants;
     double e_sat = saturation_vapor_pressure_ice(T);
-    return 0.62198 * e_sat / (p - e_sat);
+    if (!std::isfinite(e_sat) || !std::isfinite(p))
+    {
+        return 0.0;
+    }
+    const double p_safe = std::clamp(p, 100.0, 200000.0);
+    const double denom = std::max(p_safe - e_sat, 1.0);
+    const double qvs = 0.62198 * e_sat / denom;
+    return std::clamp(qvs, 0.0, 0.2);
 }
 
-/*This function computes the relative humidity.
-Takes in the vapor mixing ratio and the saturation vapor mixing ratio
-and computes the relative humidity.*/
+/**
+ * @brief Computes the relative humidity.
+ */
 inline double relative_humidity(double qv, double qvs) 
 {
-    return (qvs > 0.0) ? qv / qvs : 0.0;
+    if (!std::isfinite(qv) || !std::isfinite(qvs) || qvs <= 0.0)
+    {
+        return 0.0;
+    }
+    return qv / qvs;
 }
 
-/*This function computes the latent heat of vaporization.
-Takes in the temperature and computes the latent heat of vaporization.*/
+/**
+ * @brief Computes the latent heat of vaporization.
+ */
 inline double latent_heat_vaporization(double T) 
 {
     using namespace microphysics_constants;
-    // Simple temperature dependence
+    if (!std::isfinite(T))
+    {
+        return L_v;
+    }
     return L_v - 2370.0 * (T - T0);
 }
 
-/*This function computes the virtual temperature.
-Takes in the temperature, the vapor mixing ratio, the cloud water mixing ratio, and the rainwater mixing ratio
-and computes the virtual temperature.*/
+/**
+ * @brief Computes the virtual temperature.
+ */
 inline double virtual_temperature(double T, double qv, double qc = 0.0, double qr = 0.0) 
 {
     using namespace microphysics_constants;
-    double q_total = qv + qc + qr;  // approximate total condensate
-    return T * (1.0 + 0.608 * qv - q_total);
+    if (!std::isfinite(T))
+    {
+        return T0;
+    }
+    const double qv_safe = std::clamp(std::isfinite(qv) ? qv : 0.0, 0.0, 0.2);
+    const double qc_safe = std::clamp(std::isfinite(qc) ? qc : 0.0, 0.0, 0.2);
+    const double qr_safe = std::clamp(std::isfinite(qr) ? qr : 0.0, 0.0, 0.2);
+    double q_total = qv_safe + qc_safe + qr_safe;
+    const double Tv = T * (1.0 + 0.608 * qv_safe - q_total);
+    return std::isfinite(Tv) ? Tv : T0;
 }
 
-/*This function computes the air density.
-Takes in the pressure, the temperature, and the vapor mixing ratio
-and computes the air density.*/
+/**
+ * @brief Computes the air density.
+ */
 inline double air_density(double p, double T, double qv = 0.0) 
 {
     using namespace microphysics_constants;
     double Tv = virtual_temperature(T, qv);
-    return p / (R_d * Tv);
+    if (!std::isfinite(p) || !std::isfinite(Tv))
+    {
+        return 1.0;
+    }
+    const double p_safe = std::clamp(p, 100.0, 200000.0);
+    const double Tv_safe = std::max(Tv, 1.0);
+    const double rho_val = p_safe / (microphysics_constants::R_d * Tv_safe);
+    return std::isfinite(rho_val) ? std::max(0.0, rho_val) : 1.0;
 }
 
-/*This function computes the temperature tendency to the potential temperature tendency.
-Takes in the temperature tendency, the potential temperature, and the pressure
-and computes the temperature tendency to the potential temperature tendency.*/
+/**
+ * @brief Computes the temperature tendency to the potential temperature tendency.
+ */
 inline double temperature_tendency_to_theta(double dT_dt, double theta, double p) 
 {
     using namespace microphysics_constants;
-    double kappa = R_d / cp;
-    return dT_dt * pow(p0 / p, kappa);
+    if (!std::isfinite(dT_dt) || !std::isfinite(p))
+    {
+        return 0.0;
+    }
+    const double p_safe = std::clamp(p, 100.0, 200000.0);
+    double kappa = microphysics_constants::R_d / microphysics_constants::cp;
+    const double dtheta_dt = dT_dt * std::pow(microphysics_constants::p0 / p_safe, kappa);
+    return std::isfinite(dtheta_dt) ? dtheta_dt : 0.0;
 }
 
-/*This function computes the saturation adjustment.
-Takes in the temperature, the pressure, the vapor mixing ratio, 
-and the cloud water mixing ratioand computes the saturation adjustment.*/
+/**
+ * @brief Computes the saturation adjustment.
+ */
 inline double saturation_adjustment(double T_in, double p, double& qv, double& qc) 
 {
     using namespace microphysics_constants;
 
-    double T = T_in;
+    double T = std::isfinite(T_in) ? std::clamp(T_in, 150.0, 400.0) : T0;
+    if (!std::isfinite(qv)) qv = 0.0;
+    if (!std::isfinite(qc)) qc = 0.0;
     double qvs = saturation_mixing_ratio_water(T, p);
+    if (!std::isfinite(qvs) || qvs < 0.0)
+    {
+        qvs = 0.0;
+    }
 
-    // If the vapor mixing ratio is greater than the saturation vapor mixing ratio, compute the saturation adjustment.
     if (qv > qvs) 
     {
-        // Excess vapor becomes cloud water
         double excess = qv - qvs;
         qc += excess;
         qv = qvs;
     } 
-    // If the vapor mixing ratio is less than the saturation vapor mixing ratio 
-    // and the cloud water mixing ratio is greater than 0, compute the saturation adjustment.
     else if (qv < qvs && qc > 0.0) 
     {
-        // Evaporate cloud water to reach saturation
         double deficit = qvs - qv;
         double evaporate = std::min(deficit, qc);
         qc -= evaporate;
         qv += evaporate;
     }
 
-    // Ensure non-negative values
     qc = std::max(0.0, qc);
     qv = std::max(0.0, qv);
 
     return T;
 }
 
-/*This function converts the potential temperature field to the temperature field.
-Takes in the potential temperature field, the pressure field, and the temperature field
-and converts the potential temperature field to the temperature field.*/
+/**
+ * @brief Converts the potential temperature field to the temperature field.
+ */
 void convert_theta_to_temperature_field(
     const Field3D& theta,
     const Field3D& p,
     Field3D& temperature
 );
 
-/*This function converts the temperature field to the potential temperature field.
-Takes in the temperature field, the pressure field, and the potential temperature field
-and converts the temperature field to the potential temperature field.*/
+/**
+ * @brief Converts the temperature field to the potential temperature field.
+ */
 void convert_temperature_to_theta_field(
     const Field3D& temperature,
     const Field3D& p,
     Field3D& theta
 );
 
-} // namespace thermodynamics
+}

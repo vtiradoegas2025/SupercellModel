@@ -1,14 +1,22 @@
+/**
+ * @file random_generator.hpp
+ * @brief Declarations for the chaos module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the chaos runtime and scheme implementations.
+ * This file is part of the src/chaos subsystem.
+ */
+
 #pragma once
 #include <random>
 #include <cstdint>
 #include <vector>
+#include <string>
+#include "field3d.hpp"
 
 namespace chaos 
 {
 
-//==============================================================================
-// Random number generation utilities
-//==============================================================================
 
 /**
  * @brief Reproducible random number generator for chaos perturbations
@@ -69,6 +77,18 @@ public:
     );
 
     /**
+     * @brief Fill a Field3D with independent normal random variables
+     * @param field Output field to fill
+     * @param stream_key Base stream key
+     * @param field_name Field identifier for stream separation
+     */
+    void fill_field_normal(
+        Field3D& field,
+        uint64_t stream_key,
+        const std::string& field_name = ""
+    );
+
+    /**
      * @brief Fill a 2D field with independent normal random variables
      * @param field Output field to fill [nr][nth]
      * @param stream_key Base stream key
@@ -88,7 +108,7 @@ public:
 private:
     uint64_t base_seed_;
     int member_id_;
-    std::mt19937_64 base_generator_;  // Mersenne Twister for stream seeding
+    std::mt19937_64 base_generator_;
     std::normal_distribution<double> normal_dist_;
     std::uniform_real_distribution<double> uniform_dist_;
 
@@ -108,9 +128,6 @@ private:
     std::mt19937_64 create_stream_generator(uint64_t stream_seed) const;
 };
 
-//==============================================================================
-// Utility functions for bounding and transformations
-//==============================================================================
 
 /**
  * @brief Apply bounding to perturbation field
@@ -120,6 +137,12 @@ private:
  */
 void bound_perturbation_field(
     std::vector<std::vector<std::vector<double>>>& xi,
+    double xi_max,
+    bool use_tanh = true
+);
+
+void bound_perturbation_field(
+    Field3D& xi,
     double xi_max,
     bool use_tanh = true
 );
@@ -140,6 +163,14 @@ void apply_vertical_taper(
     double z2
 );
 
+void apply_vertical_taper(
+    Field3D& xi,
+    const std::vector<double>& z_levels,
+    const std::string& taper_id,
+    double z1,
+    double z2
+);
+
 /**
  * @brief Apply horizontal mask to 2D perturbation field
  * @param xi Input/output perturbation field [nr][nth]
@@ -150,4 +181,9 @@ void apply_horizontal_mask(
     const std::vector<std::vector<double>>& mask
 );
 
-} // namespace chaos
+void apply_horizontal_mask(
+    Field3D& xi,
+    const std::vector<std::vector<double>>& mask
+);
+
+}

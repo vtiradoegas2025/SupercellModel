@@ -1,20 +1,36 @@
-#include "../../include/soundings_base.hpp"
+/**
+ * @file soundings_base.cpp
+ * @brief Implementation for the soundings module.
+ *
+ * Provides executable logic for the soundings runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/soundings subsystem.
+ */
+
+#include "soundings_base.hpp"
+#include "physical_constants.hpp"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
-/*This file contains the implementation of the soundings base class.*/
 
 namespace 
 {
 
-// Physical constants for thermodynamic calculations
-const double R_d = 287.0;     // Dry air gas constant (J/kg·K)
-const double cp = 1004.0;     // Specific heat at constant pressure (J/kg·K)
-const double L_v = 2.5e6;     // Latent heat of vaporization (J/kg)
-const double p0 = 100000.0;   // Reference pressure (Pa)
-const double T0 = 273.15;     // Freezing temperature (K)
+const double L_v = 2.5e6;
+const double T0 = 273.15;
+
+double quiet_nan()
+{
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+bool has_complete_optional_profile(const std::vector<double>& values, std::size_t expected_levels)
+{
+    return !values.empty() && values.size() == expected_levels;
+}
 
 /**
  * @brief Calculate potential temperature
@@ -23,8 +39,16 @@ const double T0 = 273.15;     // Freezing temperature (K)
  * @return Potential temperature in Kelvin
  */
 double calculate_potential_temperature(double temperature_k, double pressure_hpa) {
+    if (!std::isfinite(temperature_k) || !std::isfinite(pressure_hpa) || pressure_hpa <= 0.0)
+    {
+        return quiet_nan();
+    }
     const double kappa = R_d / cp;
-    const double p_pa = pressure_hpa * 100.0;  // Convert to Pa
+    const double p_pa = pressure_hpa * 100.0;
+    if (!std::isfinite(p_pa) || p_pa <= 0.0)
+    {
+        return quiet_nan();
+    }
     return temperature_k * std::pow(p0 / p_pa, kappa);
 }
 
@@ -35,10 +59,19 @@ double calculate_potential_temperature(double temperature_k, double pressure_hpa
  * @return Mixing ratio in kg/kg
  */
 double calculate_mixing_ratio(double dewpoint_k, double pressure_hpa) {
-    // Tetens formula for saturation vapor pressure
+    if (!std::isfinite(dewpoint_k) || !std::isfinite(pressure_hpa) || pressure_hpa <= 0.0)
+    {
+        return quiet_nan();
+    }
+
     const double e_s = 6.112 * std::exp(17.67 * (dewpoint_k - T0) / (dewpoint_k - 29.65));
-    const double p_pa = pressure_hpa * 100.0;  // Convert to Pa
-    return (0.62198 * e_s) / (p_pa/100.0 - e_s);  // kg/kg
+    const double denom_hpa = pressure_hpa - e_s;
+    if (!std::isfinite(e_s) || !std::isfinite(denom_hpa) || denom_hpa <= 0.0)
+    {
+        return quiet_nan();
+    }
+
+    return (0.62198 * e_s) / denom_hpa;
 }
 
 /**
@@ -49,12 +82,36 @@ double calculate_mixing_ratio(double dewpoint_k, double pressure_hpa) {
  * @return Equivalent potential temperature in Kelvin
  */
 double calculate_equivalent_potential_temperature(double temperature_k, double dewpoint_k, double pressure_hpa) {
+    if (!std::isfinite(temperature_k) || !std::isfinite(dewpoint_k) ||
+        !std::isfinite(pressure_hpa) || temperature_k <= 0.0 || pressure_hpa <= 0.0)
+    {
+        return quiet_nan();
+    }
+
     const double r_v = calculate_mixing_ratio(dewpoint_k, pressure_hpa);
-    const double T_L = temperature_k * std::pow(p0 / (pressure_hpa * 100.0), R_d/(cp + L_v * r_v / temperature_k));
+    if (!std::isfinite(r_v) || r_v < 0.0)
+    {
+        return quiet_nan();
+    }
+
+    const double pressure_pa = pressure_hpa * 100.0;
+    const double theta_exponent_denominator = cp + L_v * r_v / temperature_k;
+    if (!std::isfinite(theta_exponent_denominator) || theta_exponent_denominator == 0.0)
+    {
+        return quiet_nan();
+    }
+
+    const double T_L = temperature_k *
+        std::pow(p0 / pressure_pa, R_d / theta_exponent_denominator);
+    if (!std::isfinite(T_L) || T_L <= 0.0)
+    {
+        return quiet_nan();
+    }
+
     return T_L * std::exp((L_v * r_v) / (cp * T_L));
 }
 
-} // anonymous namespace
+}
 
 /**
  * @brief Linear interpolation between two points
@@ -78,49 +135,78 @@ double linear_interpolate(double x1, double y1, double x2, double y2, double x_t
  */
 bool quality_control_sounding(SoundingData& data, const SoundingConfig& config) 
 {
-    // If the sounding data is invalid, return false.
     if (!data.is_valid()) 
     {
         std::cerr << "Sounding data is invalid - missing basic fields" << std::endl;
         return false;
     }
 
-    size_t original_size = data.num_levels();
+    const std::size_t original_size = data.num_levels();
+    if (!data.dewpoint_k.empty() && data.dewpoint_k.size() != original_size)
+    {
+        std::cerr << "Warning: Dewpoint profile length (" << data.dewpoint_k.size()
+                  << ") does not match required profile length (" << original_size
+                  << "); discarding dewpoint values." << std::endl;
+        data.dewpoint_k.clear();
+    }
+
+    const bool have_any_wind_values = !data.wind_speed_ms.empty() || !data.wind_direction_deg.empty();
+    const bool have_complete_wind_values =
+        data.wind_speed_ms.size() == original_size &&
+        data.wind_direction_deg.size() == original_size &&
+        !data.wind_speed_ms.empty() &&
+        !data.wind_direction_deg.empty();
+    if (have_any_wind_values && !have_complete_wind_values)
+    {
+        std::cerr << "Warning: Wind profile lengths (speed=" << data.wind_speed_ms.size()
+                  << ", direction=" << data.wind_direction_deg.size()
+                  << ") do not match required profile length (" << original_size
+                  << "); discarding wind values." << std::endl;
+        data.wind_speed_ms.clear();
+        data.wind_direction_deg.clear();
+    }
+
+    const bool has_dewpoint_profile = has_complete_optional_profile(data.dewpoint_k, original_size);
+    const bool has_wind_profile =
+        has_complete_optional_profile(data.wind_speed_ms, original_size) &&
+        has_complete_optional_profile(data.wind_direction_deg, original_size);
+
     std::vector<size_t> valid_indices;
 
-    // Iterate over the vertical levels and perform the quality control.
     for (size_t i = 0; i < data.num_levels(); ++i) 
     {
         bool valid_level = true;
 
-        // If the pressure is outside the range, set the valid level to false.
+        if (!std::isfinite(data.height_m[i]) ||
+            !std::isfinite(data.pressure_hpa[i]) ||
+            !std::isfinite(data.temperature_k[i]))
+        {
+            valid_level = false;
+        }
+
         if (data.pressure_hpa[i] < config.min_pressure_hpa ||
             data.pressure_hpa[i] > config.max_pressure_hpa) 
         {
             valid_level = false;
         }
 
-        // If the temperature is outside the range, set the valid level to false.
         if (data.temperature_k[i] < config.min_temperature_k ||
             data.temperature_k[i] > config.max_temperature_k) 
         {
             valid_level = false;
         }
 
-        // If the height is not monotonic, set the valid level to false.
         if (i > 0 && data.height_m[i] <= data.height_m[i-1]) 
         {
             valid_level = false;
         }
 
-        // If the level is valid, add the index to the valid indices.
         if (valid_level) 
         {
             valid_indices.push_back(i);
         }
     }
 
-    // If we have too few valid levels, reject the sounding
     if (valid_indices.size() < 5) 
     {
         std::cerr << "Insufficient valid levels in sounding: " << valid_indices.size()
@@ -128,32 +214,23 @@ bool quality_control_sounding(SoundingData& data, const SoundingConfig& config)
         return false;
     }
 
-    // Filter data to only valid levels
     SoundingData filtered_data = data;
     filtered_data.clear();
 
-    // Iterate over the valid indices and filter the data.
     for (size_t idx : valid_indices) 
     {
         filtered_data.height_m.push_back(data.height_m[idx]);
         filtered_data.pressure_hpa.push_back(data.pressure_hpa[idx]);
         filtered_data.temperature_k.push_back(data.temperature_k[idx]);
 
-        // If the dewpoint is available, add the dewpoint to the filtered data.
-        if (!data.dewpoint_k.empty()) 
+        if (has_dewpoint_profile) 
         {
             filtered_data.dewpoint_k.push_back(data.dewpoint_k[idx]);
         }
 
-        // If the wind speed is available, add the wind speed to the filtered data.
-        if (!data.wind_speed_ms.empty()) 
+        if (has_wind_profile) 
         {
             filtered_data.wind_speed_ms.push_back(data.wind_speed_ms[idx]);
-        }
-
-        // If the wind direction is available, add the wind direction to the filtered data.
-        if (!data.wind_direction_deg.empty()) 
-        {
             filtered_data.wind_direction_deg.push_back(data.wind_direction_deg[idx]);
         }
     }
@@ -172,27 +249,45 @@ bool quality_control_sounding(SoundingData& data, const SoundingConfig& config)
  */
 void calculate_derived_quantities(SoundingData& data) 
 {
-    data.potential_temperature_k.resize(data.num_levels());
-    data.equivalent_potential_temperature_k.resize(data.num_levels());
-    data.mixing_ratio_kgkg.resize(data.num_levels());
-
-    // Iterate over the vertical levels and calculate the derived thermodynamic quantities.
-    for (size_t i = 0; i < data.num_levels(); ++i) 
+    if (!data.is_valid())
     {
-        // Potential temperature
+        data.potential_temperature_k.clear();
+        data.equivalent_potential_temperature_k.clear();
+        data.mixing_ratio_kgkg.clear();
+        return;
+    }
+
+    const std::size_t levels = data.num_levels();
+    data.potential_temperature_k.assign(levels, quiet_nan());
+
+    for (size_t i = 0; i < levels; ++i) 
+    {
         data.potential_temperature_k[i] = calculate_potential_temperature(
             data.temperature_k[i], data.pressure_hpa[i]);
+    }
 
-        // If the dewpoint is available, calculate the mixing ratio and equivalent potential temperature.
-        if (!data.dewpoint_k.empty() && i < data.dewpoint_k.size()) 
+    const bool has_complete_dewpoint_profile = has_complete_optional_profile(data.dewpoint_k, levels);
+    if (!has_complete_dewpoint_profile)
+    {
+        data.mixing_ratio_kgkg.clear();
+        data.equivalent_potential_temperature_k.clear();
+        return;
+    }
+
+    data.equivalent_potential_temperature_k.assign(levels, quiet_nan());
+    data.mixing_ratio_kgkg.assign(levels, quiet_nan());
+
+    for (size_t i = 0; i < levels; ++i)
+    {
+        data.mixing_ratio_kgkg[i] = calculate_mixing_ratio(
+            data.dewpoint_k[i], data.pressure_hpa[i]);
+
+        data.equivalent_potential_temperature_k[i] =
+            calculate_equivalent_potential_temperature(
+                data.temperature_k[i], data.dewpoint_k[i], data.pressure_hpa[i]);
+        if (!std::isfinite(data.mixing_ratio_kgkg[i]))
         {
-            data.mixing_ratio_kgkg[i] = calculate_mixing_ratio(
-                data.dewpoint_k[i], data.pressure_hpa[i]);
-
-            // Equivalent potential temperature
-            data.equivalent_potential_temperature_k[i] =
-                calculate_equivalent_potential_temperature(
-                    data.temperature_k[i], data.dewpoint_k[i], data.pressure_hpa[i]);
+            data.equivalent_potential_temperature_k[i] = quiet_nan();
         }
     }
 }
@@ -209,105 +304,141 @@ SoundingData interpolate_sounding_linear(
     const std::vector<double>& target_heights,
     const SoundingConfig& config) {
 
+    if (!source.is_valid())
+    {
+        throw std::runtime_error("Source sounding is invalid for interpolation");
+    }
+
     SoundingData result;
     result.height_m = target_heights;
+    const std::size_t source_levels = source.height_m.size();
+    const bool has_dewpoint_profile = has_complete_optional_profile(source.dewpoint_k, source_levels);
+    const bool has_wind_profile =
+        has_complete_optional_profile(source.wind_speed_ms, source_levels) &&
+        has_complete_optional_profile(source.wind_direction_deg, source_levels);
+    if (!source.dewpoint_k.empty() && !has_dewpoint_profile)
+    {
+        std::cerr << "Warning: Ignoring incomplete dewpoint profile during interpolation (size="
+                  << source.dewpoint_k.size() << ", expected=" << source_levels << ")."
+                  << std::endl;
+    }
+    if ((!source.wind_speed_ms.empty() || !source.wind_direction_deg.empty()) && !has_wind_profile)
+    {
+        std::cerr << "Warning: Ignoring incomplete wind profile during interpolation (speed="
+                  << source.wind_speed_ms.size() << ", direction=" << source.wind_direction_deg.size()
+                  << ", expected=" << source_levels << ")." << std::endl;
+    }
 
-    // Initialize result arrays
     result.pressure_hpa.resize(target_heights.size());
     result.temperature_k.resize(target_heights.size());
     result.potential_temperature_k.resize(target_heights.size());
 
-    // If the dewpoint is available, resize the result arrays.
-    if (!source.dewpoint_k.empty()) 
+    if (has_dewpoint_profile) 
     {
         result.dewpoint_k.resize(target_heights.size());
         result.mixing_ratio_kgkg.resize(target_heights.size());
         result.equivalent_potential_temperature_k.resize(target_heights.size());
     }
 
-    // If the wind speed is available, resize the result arrays.
-    if (!source.wind_speed_ms.empty()) {
+    if (has_wind_profile) {
         result.wind_speed_ms.resize(target_heights.size());
         result.wind_direction_deg.resize(target_heights.size());
     }
 
-    // Iterate over the target heights and interpolate the sounding data.
     for (size_t i = 0; i < target_heights.size(); ++i) 
     {
         double target_h = target_heights[i];
 
-        // Find bracketing levels in source data
         auto it = std::lower_bound(source.height_m.begin(), source.height_m.end(), target_h);
 
-        // If the target height is below the lowest level, extrapolate using the bottom two levels.
+        auto assign_optional_linear = [&](size_t idx1, size_t idx2, bool use_linear)
+        {
+            if (has_dewpoint_profile)
+            {
+                result.dewpoint_k[i] = use_linear
+                    ? linear_interpolate(
+                        source.height_m[idx1], source.dewpoint_k[idx1],
+                        source.height_m[idx2], source.dewpoint_k[idx2], target_h)
+                    : source.dewpoint_k[idx1];
+            }
+
+            if (has_wind_profile)
+            {
+                result.wind_speed_ms[i] = use_linear
+                    ? linear_interpolate(
+                        source.height_m[idx1], source.wind_speed_ms[idx1],
+                        source.height_m[idx2], source.wind_speed_ms[idx2], target_h)
+                    : source.wind_speed_ms[idx1];
+                result.wind_direction_deg[i] = use_linear
+                    ? linear_interpolate(
+                        source.height_m[idx1], source.wind_direction_deg[idx1],
+                        source.height_m[idx2], source.wind_direction_deg[idx2], target_h)
+                    : source.wind_direction_deg[idx1];
+            }
+        };
+
         if (it == source.height_m.begin()) 
         {
-            // If the extrapolation below the ground is requested, extrapolate using the bottom two levels.
             if (config.extrapolate_below_ground) 
             {
-                // Extrapolate using bottom two levels
-                size_t idx1 = 0, idx2 = 1;
-
-                // If there are more than one level, interpolate using the bottom two levels.
                 if (source.height_m.size() > 1)
                 {
+                    const size_t idx1 = 0;
+                    const size_t idx2 = 1;
                     result.pressure_hpa[i] = linear_interpolate(
                         source.height_m[idx1], source.pressure_hpa[idx1],
                         source.height_m[idx2], source.pressure_hpa[idx2], target_h);
                     result.temperature_k[i] = linear_interpolate(
                         source.height_m[idx1], source.temperature_k[idx1],
                         source.height_m[idx2], source.temperature_k[idx2], target_h);
+                    assign_optional_linear(idx1, idx2, true);
                 } 
                 else 
                 {
-                    // Single level - use as is
                     result.pressure_hpa[i] = source.pressure_hpa[0];
                     result.temperature_k[i] = source.temperature_k[0];
+                    assign_optional_linear(0, 0, false);
                 }
             } 
             else 
             {
-                // Use lowest level
                 result.pressure_hpa[i] = source.pressure_hpa[0];
                 result.temperature_k[i] = source.temperature_k[0];
+                assign_optional_linear(0, 0, false);
             }
         } 
-        // If the target height is above the highest level, extrapolate using the top two levels.
         else if (it == source.height_m.end()) 
         {
-            // If the extrapolation above the top is requested, extrapolate using the top two levels.
             if (config.extrapolate_above_top) 
             {
-                // Extrapolate using top two levels
-                size_t idx1 = source.height_m.size() - 2;
-                size_t idx2 = source.height_m.size() - 1;
-
-                // If there are more than one level, interpolate using the top two levels.
                 if (source.height_m.size() > 1) 
                 {
+                    const size_t idx2 = source.height_m.size() - 1;
+                    const size_t idx1 = idx2 - 1;
                     result.pressure_hpa[i] = linear_interpolate(
                         source.height_m[idx1], source.pressure_hpa[idx1],
                         source.height_m[idx2], source.pressure_hpa[idx2], target_h);
                     result.temperature_k[i] = linear_interpolate(
                         source.height_m[idx1], source.temperature_k[idx1],
                         source.height_m[idx2], source.temperature_k[idx2], target_h);
+                    assign_optional_linear(idx1, idx2, true);
                 } 
                 else 
                 {
                     result.pressure_hpa[i] = source.pressure_hpa.back();
                     result.temperature_k[i] = source.temperature_k.back();
+                    assign_optional_linear(source.height_m.size() - 1, source.height_m.size() - 1, false);
                 }
             } 
             else 
             {
-                // Use highest level
                 result.pressure_hpa[i] = source.pressure_hpa.back();
                 result.temperature_k[i] = source.temperature_k.back();
+                assign_optional_linear(source.height_m.size() - 1, source.height_m.size() - 1, false);
             }
         } 
         else 
         {
-            // Interpolate between bracketing levels
             size_t idx2 = it - source.height_m.begin();
             size_t idx1 = idx2 - 1;
 
@@ -318,25 +449,18 @@ SoundingData interpolate_sounding_linear(
                 source.height_m[idx1], source.temperature_k[idx1],
                 source.height_m[idx2], source.temperature_k[idx2], target_h);
 
-            // If the dewpoint is available, interpolate the dewpoint.
-            if (!source.dewpoint_k.empty()) 
+            if (has_dewpoint_profile) 
             {
                 result.dewpoint_k[i] = linear_interpolate(
                     source.height_m[idx1], source.dewpoint_k[idx1],
                     source.height_m[idx2], source.dewpoint_k[idx2], target_h);
             }
 
-            // If the wind speed is available, interpolate the wind speed.
-            if (!source.wind_speed_ms.empty()) 
+            if (has_wind_profile) 
             {
                 result.wind_speed_ms[i] = linear_interpolate(
                     source.height_m[idx1], source.wind_speed_ms[idx1],
                     source.height_m[idx2], source.wind_speed_ms[idx2], target_h);
-            }
-
-            // If the wind direction is available, interpolate the wind direction.
-            if (!source.wind_direction_deg.empty()) 
-            {
                 result.wind_direction_deg[i] = linear_interpolate(
                     source.height_m[idx1], source.wind_direction_deg[idx1],
                     source.height_m[idx2], source.wind_direction_deg[idx2], target_h);
@@ -344,7 +468,6 @@ SoundingData interpolate_sounding_linear(
         }
     }
 
-    // Calculate derived quantities
     calculate_derived_quantities(result);
 
     return result;

@@ -1,123 +1,279 @@
 #pragma once
-#include <vector>
+
+#include <algorithm>
+#include <cmath>
 #include <memory>
+#include <string>
+#include <vector>
+
 #include "field3d.hpp"
-#include "radiation_base.hpp"
-#include "boundary_layer_base.hpp"
-#include "turbulence_base.hpp"
-#include "advection_base.hpp"
-#include "diffusion_base.hpp"
-#include "time_stepping_base.hpp"
-#include "terrain_base.hpp"
-#include "chaos_base.hpp"
+#include "physical_constants.hpp"
 
-/*This header file contains the main simulation class and the main simulation functions.
-The simulation class is responsible for the main simulation loop.
-The simulation functions are responsible for the main simulation functions.
-This module is used to initialize the simulation, run the simulation, and clean up the simulation.*/
+/**
+ * @file simulation.hpp
+ * @brief Central runtime API and shared state declarations for the model.
+ *
+ * Exposes global grid/state variables and subsystem entry points used by
+ * the main integration loop.
+ * This header is the integration surface connecting dynamics, physics,
+ * numerics, diagnostics, and optional GUI execution.
+ */
 
-
-
-// Forward declare dynamics scheme
 class DynamicsScheme;
+class AdvectionSchemeBase;
+class DiffusionSchemeBase;
+class TimeSteppingSchemeBase;
 
-// Grid parameters (configurable at runtime)
-extern int NR;         // radial points
-extern int NTH;        // azimuthal points (theta)
-extern int NZ;         // vertical points
+struct RadiationConfig;
+struct BoundaryLayerConfig;
+struct SurfaceConfig;
+struct TurbulenceConfig;
+struct TurbulenceTendencies;
+struct GridMetrics;
+struct AdvectionConfig;
+struct DiffusionConfig;
+struct TimeSteppingConfig;
+struct TerrainConfig;
 
-// Grid resolution parameters (computed from grid size)
-extern double dr;      // radial resolution (m)
-extern double dz;      // vertical resolution (m)
-extern double dt;      // time step (s)
-extern double dtheta;  // azimuthal resolution (rad)
-
-// Physical constants (shared)
-inline constexpr double g = 9.81;       // gravity (m/s^2)
-inline constexpr double R_d = 287.0;    // dry air gas constant (J/kg·K)
-inline constexpr double cp = 1004.0;    // specific heat at constant pressure (J/kg·K)
-inline constexpr double gamma = cp / (cp - R_d); // adiabatic index
-inline constexpr double p0 = 100000.0;  // reference pressure (Pa)
-inline constexpr double theta0 = 300.0; // base potential temperature (K)
-
-// Anelastic approximation parameters
-extern std::vector<double> rho0_base;  // base-state density profile (nz levels)
-
-// Kessler microphysics parameters (warm rain)
-inline constexpr double qc0 = 1.0e-3;   // autoconversion threshold (kg/kg)
-inline constexpr double c_auto = 1.0e-3; // autoconversion rate (s⁻¹)
-inline constexpr double c_accr = 2.2;   // accretion coefficient (s⁻¹)
-inline constexpr double c_evap = 3.0e-3; // evaporation rate (s⁻¹)
-inline constexpr double L_v = 2.5e6;    // latent heat of vaporization (J/kg)
-inline constexpr double a_term = 65.0;  // terminal velocity coefficient
-inline constexpr double b_term = 0.125; // terminal velocity exponent
-inline constexpr double Vt_max = 20.0;  // maximum terminal velocity (m/s)
-
-// Ice microphysics parameters
-inline constexpr double T0 = 273.15;    // freezing temperature (K)
-inline constexpr double L_f = 3.34e5;   // latent heat of fusion (J/kg)
-inline constexpr double L_s = L_v + L_f; // latent heat of sublimation (J/kg)
-inline constexpr double c_rime = 1.0;   // riming efficiency
-inline constexpr double c_freeze = 1.0e-3; // homogeneous freezing rate (s⁻¹)
-inline constexpr double c_melt = 1.0e-3; // melting rate (s⁻¹)
-inline constexpr double c_subl = 1.0e-3; // sublimation rate (s⁻¹)
-inline constexpr double a_hail = 114.0; // hail terminal velocity coefficient
-inline constexpr double b_hail = 0.5;   // hail terminal velocity exponent
-inline constexpr double a_grau = 40.0;  // graupel terminal velocity coefficient
-inline constexpr double b_grau = 0.37;  // graupel terminal velocity exponent
-inline constexpr double Vt_max_hail = 40.0; // max hail terminal velocity (m/s)
-inline constexpr double Vt_max_grau = 15.0; // max graupel terminal velocity (m/s)
-
-// Radiation constants
-inline constexpr double sigma_sb = 5.67e-8;  // Stefan-Boltzmann (W/m²/K⁴)
-inline constexpr double S0_solar = 1366.0;   // Solar constant (W/m²)
-
-// Simulation time tracking
-extern double simulation_time;  // current simulation time [s]
-
-// Shared fields (defined in equations.cpp for integrated build; in GUI_STANDALONE, tracer is defined in gui.cpp)
-extern Field3D rho;      // [r][th][z]
-extern Field3D p;        // [r][th][z]
-extern Field3D u;        // radial wind [r][th][z]
-extern Field3D w;        // vertical wind [r][th][z]
-extern Field3D v_theta;  // azimuthal wind [r][th][z]
-extern Field3D tracer;   // passive scalar [r][th][z]
-
-// Thermodynamic fields
-extern Field3D theta;    // potential temperature [r][th][z] (K)
-extern Field3D qv;       // water vapor mixing ratio [r][th][z] (kg/kg)
-extern Field3D qc;       // cloud water mixing ratio [r][th][z] (kg/kg)
-extern Field3D qr;       // rain water mixing ratio [r][th][z] (kg/kg)
-extern Field3D qi;       // cloud ice mixing ratio [r][th][z] (kg/kg)
-extern Field3D qs;       // snow mixing ratio [r][th][z] (kg/kg)
-extern Field3D qh;       // hail mixing ratio [r][th][z] (kg/kg)
-extern Field3D qg;       // graupel mixing ratio [r][th][z] (kg/kg)
-
-// Wind profile for hodograph initialization
-struct WindProfile 
+namespace chaos
 {
-    double u_sfc, v_sfc;     // surface winds (m/s)
-    double u_1km, v_1km;     // 1km winds (m/s)
-    double u_6km, v_6km;     // 6km winds (m/s)
-};
-extern WindProfile global_wind_profile;
-extern double global_cape_target; // J/kg
+struct ChaosConfig;
+struct ChaosDiagnostics;
+}
 
-// Nested grid configuration
-struct NestedGridConfig 
+extern int NR;
+extern int NTH;
+extern int NZ;
+
+extern double dr;
+extern double dz;
+extern double dt;
+extern double dtheta;
+
+inline constexpr double gamma = physical_constants::dry_air_gamma;
+inline constexpr double theta0 = physical_constants::theta_reference_k;
+inline constexpr float theta_min_k = 200.0f;
+inline constexpr float theta_max_k = 500.0f;
+inline constexpr float pressure_min_pa = 1000.0f;
+inline constexpr float pressure_max_pa = 200000.0f;
+inline constexpr float density_min_kgm3 = 0.05f;
+inline constexpr float density_max_kgm3 = 2.0f;
+inline constexpr float wind_horizontal_abs_max_ms = 180.0f;
+inline constexpr float wind_vertical_abs_max_ms = 120.0f;
+inline constexpr float qv_max_kgkg = 0.05f;
+inline constexpr float hydrometeor_max_kgkg = 0.05f;
+
+enum class LogProfile : int
+{
+    quiet = 0,
+    normal = 1,
+    debug = 2
+};
+
+extern LogProfile global_log_profile;
+
+/**
+ * @brief Returns whether current logging level includes the target level.
+ * @param level Minimum desired logging level.
+ * @return True when logging at the requested level is enabled.
+ */
+inline bool log_at_least(LogProfile level)
+{
+    return static_cast<int>(global_log_profile) >= static_cast<int>(level);
+}
+
+/**
+ * @brief Returns whether normal logging output is enabled.
+ */
+inline bool log_normal_enabled()
+{
+    return log_at_least(LogProfile::normal);
+}
+
+/**
+ * @brief Returns whether debug logging output is enabled.
+ */
+inline bool log_debug_enabled()
+{
+    return log_at_least(LogProfile::debug);
+}
+
+extern bool global_perf_timing_enabled;
+extern int global_perf_report_every_steps;
+
+/**
+ * @brief Clamps potential temperature into physically allowed bounds.
+ * @param value Candidate potential temperature in kelvin.
+ * @return Clamped potential temperature.
+ */
+inline float clamp_theta_k(float value)
+{
+    return std::clamp(value, theta_min_k, theta_max_k);
+}
+
+/**
+ * @brief Clamps pressure into physically allowed bounds.
+ * @param value Candidate pressure in pascals.
+ * @return Clamped pressure.
+ */
+inline float clamp_pressure_pa(float value)
+{
+    return std::clamp(value, pressure_min_pa, pressure_max_pa);
+}
+
+/**
+ * @brief Sanitizes non-finite values and enforces non-negativity.
+ * @param value Candidate scalar.
+ * @return Zero for non-finite input, otherwise `max(value, 0)`.
+ */
+inline float clamp_non_negative(float value)
+{
+    if (!std::isfinite(value))
+    {
+        return 0.0f;
+    }
+    return std::max(0.0f, value);
+}
+
+/**
+ * @brief Clamps density into physically allowed bounds.
+ * @param value Candidate density in kg/m^3.
+ * @return Clamped density.
+ */
+inline float clamp_density_kgm3(float value)
+{
+    return std::clamp(value, density_min_kgm3, density_max_kgm3);
+}
+
+/**
+ * @brief Clamps horizontal wind speed magnitude.
+ * @param value Candidate horizontal wind speed in m/s.
+ * @return Clamped wind speed.
+ */
+inline float clamp_wind_horizontal_ms(float value)
+{
+    return std::clamp(value, -wind_horizontal_abs_max_ms, wind_horizontal_abs_max_ms);
+}
+
+/**
+ * @brief Clamps vertical wind speed magnitude.
+ * @param value Candidate vertical wind speed in m/s.
+ * @return Clamped wind speed.
+ */
+inline float clamp_wind_vertical_ms(float value)
+{
+    return std::clamp(value, -wind_vertical_abs_max_ms, wind_vertical_abs_max_ms);
+}
+
+/**
+ * @brief Clamps water-vapor mixing ratio and sanitizes non-finite input.
+ * @param value Candidate mixing ratio in kg/kg.
+ * @return Clamped water-vapor mixing ratio.
+ */
+inline float clamp_qv_kgkg(float value)
+{
+    if (!std::isfinite(value))
+    {
+        return 0.0f;
+    }
+    return std::clamp(value, 0.0f, qv_max_kgkg);
+}
+
+/**
+ * @brief Clamps hydrometeor mixing ratio and sanitizes non-finite input.
+ * @param value Candidate mixing ratio in kg/kg.
+ * @return Clamped hydrometeor mixing ratio.
+ */
+inline float clamp_hydrometeor_kgkg(float value)
+{
+    if (!std::isfinite(value))
+    {
+        return 0.0f;
+    }
+    return std::clamp(value, 0.0f, hydrometeor_max_kgkg);
+}
+
+extern std::vector<double> rho0_base;
+
+inline constexpr double qc0 = 1.0e-3;
+inline constexpr double c_auto = 1.0e-3;
+inline constexpr double c_accr = 2.2;
+inline constexpr double c_evap = 3.0e-3;
+inline constexpr double L_v = physical_constants::latent_heat_vaporization_jkg;
+inline constexpr double a_term = 65.0;
+inline constexpr double b_term = 0.125;
+inline constexpr double Vt_max = 20.0;
+
+inline constexpr double T0 = physical_constants::freezing_temperature_k;
+inline constexpr double L_f = physical_constants::latent_heat_fusion_jkg;
+inline constexpr double L_s = physical_constants::latent_heat_sublimation_jkg;
+inline constexpr double c_rime = 1.0;
+inline constexpr double c_freeze = 1.0e-3;
+inline constexpr double c_melt = 1.0e-3;
+inline constexpr double c_subl = 1.0e-3;
+inline constexpr double a_hail = 114.0;
+inline constexpr double b_hail = 0.5;
+inline constexpr double a_grau = 40.0;
+inline constexpr double b_grau = 0.37;
+inline constexpr double Vt_max_hail = 40.0;
+inline constexpr double Vt_max_grau = 15.0;
+
+inline constexpr double sigma_sb = physical_constants::stefan_boltzmann_wm2k4;
+inline constexpr double S0_solar = physical_constants::solar_constant_wm2;
+
+extern double simulation_time;
+
+extern Field3D rho;
+extern Field3D p;
+extern Field3D u;
+extern Field3D w;
+extern Field3D v_theta;
+extern Field3D tracer;
+
+extern Field3D theta;
+extern Field3D qv;
+extern Field3D qc;
+extern Field3D qr;
+extern Field3D qi;
+extern Field3D qs;
+extern Field3D qh;
+extern Field3D qg;
+
+struct WindProfile
+{
+    double u_sfc;
+    double v_sfc;
+    double u_1km;
+    double v_1km;
+    double u_6km;
+    double v_6km;
+};
+
+extern WindProfile global_wind_profile;
+extern double global_cape_target;
+extern double global_sfc_theta_k;
+extern double global_sfc_qv_kgkg;
+extern double global_tropopause_z_m;
+
+extern double global_bubble_center_x_m;
+extern double global_bubble_center_z_m;
+extern double global_bubble_radius_m;
+extern double global_bubble_dtheta_k;
+
+struct NestedGridConfig
 {
     bool enabled = false;
-    int center_i = NR/2;     // center of nested grid in parent coordinates
-    int center_j = NTH/2;
-    int center_k = NZ/2;
-    int nest_size_r = 32;   // nested grid size
+    int center_i = NR / 2;
+    int center_j = NTH / 2;
+    int center_k = NZ / 2;
+    int nest_size_r = 32;
     int nest_size_th = 32;
     int nest_size_z = 32;
-    double refinement = 3.0; // refinement ratio
+    double refinement = 3.0;
 };
+
 extern NestedGridConfig nested_config;
 
-// Nested grid fields (subset of main grid with higher resolution)
 extern Field3D nest_rho;
 extern Field3D nest_p;
 extern Field3D nest_u;
@@ -131,13 +287,10 @@ extern Field3D nest_qh;
 extern Field3D nest_qg;
 extern Field3D nest_tracer;
 
-// Radar reflectivity field
 extern Field3D radar_reflectivity;
 
-// Dynamics scheme
 extern std::unique_ptr<DynamicsScheme> dynamics_scheme;
 
-// Vorticity diagnostic fields
 extern Field3D vorticity_r;
 extern Field3D vorticity_theta;
 extern Field3D vorticity_z;
@@ -145,105 +298,242 @@ extern Field3D stretching_term;
 extern Field3D tilting_term;
 extern Field3D baroclinic_term;
 
-// Angular momentum diagnostics (for tornado dynamics)
 extern Field3D angular_momentum;
 extern Field3D angular_momentum_tendency;
 
-// Pressure diagnostics
 extern Field3D p_prime;
 extern Field3D dynamic_pressure;
 extern Field3D buoyancy_pressure;
 
-// Radiation fields
-extern Field3D dtheta_dt_rad;  // radiation tendency
+extern Field3D dtheta_dt_rad;
 
-// Boundary layer fields
-extern Field3D dtheta_dt_pbl;  // PBL theta tendency
-extern Field3D dqv_dt_pbl;     // PBL moisture tendency
-extern Field3D du_dt_pbl;      // PBL u-wind tendency
-extern Field3D dv_dt_pbl;      // PBL v-wind tendency
-extern Field3D dtke_dt_pbl;    // PBL TKE tendency
+extern Field3D dtheta_dt_pbl;
+extern Field3D dqv_dt_pbl;
+extern Field3D du_dt_pbl;
+extern Field3D dv_dt_pbl;
+extern Field3D dtke_dt_pbl;
 
-// TKE field (for MYNN scheme)
 extern Field3D tke;
 extern RadiationConfig global_radiation_config;
 
-// Boundary layer configuration
 extern BoundaryLayerConfig global_boundary_layer_config;
 extern SurfaceConfig global_surface_config;
 
-// Turbulence configuration
 extern TurbulenceConfig global_turbulence_config;
 
-// Numerics configuration
 extern GridMetrics global_grid_metrics;
 extern AdvectionConfig global_advection_config;
 extern DiffusionConfig global_diffusion_config;
 extern TimeSteppingConfig global_time_stepping_config;
 extern std::unique_ptr<AdvectionSchemeBase> advection_scheme;
+extern std::unique_ptr<DiffusionSchemeBase> diffusion_scheme;
+extern std::unique_ptr<TimeSteppingSchemeBase> time_stepping_scheme;
 
-// Chaos configuration (defined in src/chaos/chaos.cpp)
-namespace chaos {
-    class ChaosConfig;
-}
 extern chaos::ChaosConfig global_chaos_config;
-
-// Terrain configuration (defined in src/terrain.cpp)
 extern TerrainConfig global_terrain_config;
 
-// Simulation API
+/**
+ * @brief Initializes global simulation state and subsystem defaults.
+ */
 void initialize();
+
+/**
+ * @brief Resizes global fields to current grid dimensions.
+ */
 void resize_fields();
-void advect_tracer(double dt_advect);  // Uses new advection component internally
-void advect_thermodynamics(double dt_advect);  // Uses new advection component internally
+
+/**
+ * @brief Advances passive tracer by advection for one step.
+ * @param dt_advect Advection step in seconds.
+ */
+void advect_tracer(double dt_advect);
+
+/**
+ * @brief Advances thermodynamic tracers by advection for one step.
+ * @param dt_advect Advection step in seconds.
+ */
+void advect_thermodynamics(double dt_advect);
+
+/**
+ * @brief Applies microphysics tendencies for one step.
+ * @param dt_micro Microphysics step in seconds.
+ */
 void step_microphysics(double dt_micro);
-void step_dynamics();
+
+/**
+ * @brief Applies model boundary conditions.
+ */
 void apply_boundary_conditions();
+
+/**
+ * @brief Computes radar reflectivity diagnostic fields.
+ */
 void calculate_radar_reflectivity();
 
-// Microphysics API
+/**
+ * @brief Initializes the microphysics subsystem.
+ * @param scheme_name Microphysics scheme identifier.
+ */
 void initialize_microphysics(const std::string& scheme_name = "kessler");
 
-// Dynamics API
-void initialize_dynamics(const std::string& scheme_name = "supercell");
+/**
+ * @brief Initializes the dynamics subsystem.
+ * @param scheme_name Dynamics scheme identifier.
+ */
+void initialize_dynamics(const std::string& scheme_name = "tornado");
+
+/**
+ * @brief Advances dynamics using the active integration path.
+ * @param current_time Current simulation time in seconds.
+ */
 void step_dynamics(double current_time = 0.0);
+
+/**
+ * @brief Advances dynamics using legacy dynamics implementation.
+ * @param current_time Current simulation time in seconds.
+ */
 void step_dynamics_old(double current_time = 0.0);
+
+/**
+ * @brief Advances dynamics using the modular dynamics implementation.
+ * @param dt_dynamics Dynamics step length in seconds.
+ * @param current_time Current simulation time in seconds.
+ */
 void step_dynamics_new(double dt_dynamics, double current_time = 0.0);
+
+/**
+ * @brief Computes dynamics diagnostic fields.
+ */
 void compute_dynamics_diagnostics();
 
-// Radiation API
+/**
+ * @brief Applies radiation tendencies for the current time.
+ * @param current_time Current simulation time in seconds.
+ */
 void step_radiation(double current_time);
 
-// Boundary layer API
+/**
+ * @brief Initializes the boundary-layer subsystem.
+ * @param scheme_name Boundary-layer scheme identifier.
+ * @param cfg Boundary-layer configuration.
+ * @param sfc Surface-layer configuration.
+ */
 void initialize_boundary_layer(const std::string& scheme_name,
-                              const BoundaryLayerConfig& cfg,
-                              const SurfaceConfig& sfc);
+                               const BoundaryLayerConfig& cfg,
+                               const SurfaceConfig& sfc);
+
+/**
+ * @brief Steps boundary-layer physics for the current time.
+ * @param current_time Current simulation time in seconds.
+ */
 void step_boundary_layer(double current_time);
 
-// Turbulence API
-void initialize_turbulence(const std::string& scheme_name,
-                          const TurbulenceConfig& cfg);
+/**
+ * @brief Reports whether boundary-layer physics updated this step.
+ * @return True if boundary-layer tendencies were applied.
+ */
+bool boundary_layer_updated_this_step();
+
+/**
+ * @brief Initializes the turbulence subsystem.
+ * @param scheme_name Turbulence scheme identifier.
+ * @param cfg Turbulence configuration.
+ */
+void initialize_turbulence(const std::string& scheme_name, const TurbulenceConfig& cfg);
+
+/**
+ * @brief Steps turbulence tendencies for the current time.
+ * @param current_time Current simulation time in seconds.
+ * @param tendencies Output turbulence tendencies.
+ */
 void step_turbulence(double current_time, TurbulenceTendencies& tendencies);
 
-// Chaos API (stochastic perturbations)
+/**
+ * @brief Initializes the chaos subsystem.
+ * @param cfg Chaos configuration.
+ */
 void initialize_chaos(const chaos::ChaosConfig& cfg);
+
+/**
+ * @brief Applies configured chaos perturbations to initial conditions.
+ */
 void apply_chaos_initial_conditions();
+
+/**
+ * @brief Applies configured chaos perturbations to tendency pathways.
+ */
 void apply_chaos_tendencies();
+
+/**
+ * @brief Applies chaos multipliers to microphysics tendencies.
+ */
+void apply_chaos_to_microphysics_tendencies(Field3D& dtheta_dt,
+                                            Field3D& dqv_dt,
+                                            Field3D& dqc_dt,
+                                            Field3D& dqr_dt,
+                                            Field3D& dqi_dt,
+                                            Field3D& dqs_dt,
+                                            Field3D& dqg_dt,
+                                            Field3D& dqh_dt);
+
+/**
+ * @brief Applies chaos multipliers to turbulence tendencies.
+ * @param tendencies Turbulence tendency container.
+ */
+void apply_chaos_to_turbulence_tendencies(TurbulenceTendencies& tendencies);
+
+/**
+ * @brief Advances stochastic chaos noise fields.
+ * @param dt Step length in seconds.
+ */
 void step_chaos_noise(double dt);
+
+/**
+ * @brief Returns current chaos diagnostics.
+ * @return Immutable reference to chaos diagnostics.
+ */
 const chaos::ChaosDiagnostics& get_chaos_diagnostics();
+
+/**
+ * @brief Resets accumulated chaos diagnostics.
+ */
 void reset_chaos_diagnostics();
 
-// Numerics API
+/**
+ * @brief Initializes numerical subsystems.
+ */
 void initialize_numerics();
 
-// Terrain API
+/**
+ * @brief Rebuilds grid metrics from active terrain fields.
+ */
+void refresh_grid_metrics_from_terrain();
+
+/**
+ * @brief Computes a stable runtime timestep recommendation.
+ * @return Recommended timestep in seconds.
+ */
+double choose_runtime_timestep();
+
+/**
+ * @brief Builds terrain fields for the current configuration.
+ */
 void build_terrain_fields();
 
-// Nested grid API
+/**
+ * @brief Initializes nested-grid storage and metadata.
+ */
 void initialize_nested_grid();
+
+/**
+ * @brief Feeds nested-grid updates back to the parent grid.
+ */
 void feedback_to_parent();
 
-// GUI API (optional)
 #ifdef ENABLE_GUI
+/**
+ * @brief Runs the GUI front end.
+ * @param autoExportMs Optional automatic export cadence in milliseconds.
+ */
 void run_gui(int autoExportMs = 0);
 #endif

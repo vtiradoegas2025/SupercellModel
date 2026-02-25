@@ -1,5 +1,14 @@
+/**
+ * @file sharpy_sounding.hpp
+ * @brief Declarations for the soundings module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the soundings runtime and scheme implementations.
+ * This file is part of the src/soundings subsystem.
+ */
+
 #pragma once
-#include "../../base/soundings_base.hpp"
+#include "soundings/base/soundings_base.hpp"
 
 /**
  * @brief SHARPY sounding scheme implementation
@@ -85,10 +94,4 @@ private:
      */
     bool validate_sharpy_file(const std::string& file_path);
 
-private:
-    /**
-     * @brief Create a sample sounding for testing
-     * @return Sample SoundingData structure
-     */
-    SoundingData create_sample_sounding();
 };

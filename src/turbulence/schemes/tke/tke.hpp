@@ -1,45 +1,59 @@
+/**
+ * @file tke.hpp
+ * @brief Declarations for the turbulence module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the turbulence runtime and scheme implementations.
+ * This file is part of the src/turbulence subsystem.
+ */
+
 #pragma once
-#include "../../base/eddy_viscosity.hpp"
+#include "turbulence/base/eddy_viscosity.hpp"
 #include "turbulence_base.hpp"
 
-/*This file contains the declaration of the TKE turbulence scheme.
-It manages the initialization of the TKE turbulence scheme and the computation of the TKE turbulence scheme.*/
+/**
+ * @brief 1.5-order TKE turbulence closure with prognostic SGS energy.
+ */
 class TKEScheme : public TurbulenceSchemeBase 
 {
 private:
-    // TKE scheme parameters (Deardorff-style)
-    double Ce1_ = 1.0;        // dissipation coefficient
-    double Ce2_ = 1.33;       // dissipation coefficient
-    double c_k_ = 0.1;        // eddy viscosity coefficient
-    double c_eps_ = 0.19;     // dissipation coefficient
-    double Pr_t_ = 0.7;       // turbulent Prandtl number
-    double Sc_t_ = 0.7;       // turbulent Schmidt number
+    double Ce1_ = 1.0;
+    double Ce2_ = 1.33;
+    double c_k_ = 0.1;
+    double c_eps_ = 0.19;
+    double Pr_t_ = 0.7;
+    double Sc_t_ = 0.7;
 
-    // Mixing length parameters
-    double c_l_ = 0.15;       // mixing length coefficient
-    double l_max_ = 500.0;    // maximum mixing length [m]
+    double c_l_ = 0.15;
+    double l_max_ = 500.0;
 
-    // Prognostic TKE field
-    Field3D tke_;  // TKE [m²/s²]
+    Field3D tke_;
 
-    // Computed fields
-    Field3D nu_t_;     // eddy viscosity
-    Field3D K_theta_;  // temperature diffusivity
-    Field3D K_q_;      // moisture diffusivity
-    Field3D K_tke_;    // TKE diffusivity
+    Field3D nu_t_;
+    Field3D K_theta_;
+    Field3D K_q_;
+    Field3D K_tke_;
 
 public:
+    /**
+     * @brief Constructs the TKE turbulence scheme.
+     */
     TKEScheme();
 
     std::string name() const override { return "tke"; }
+    /**
+     * @brief Returns required state-field mask for this scheme.
+     */
     int required_fields() const override;
 
-    /*This function initializes the TKE turbulence scheme.
-    Takes in the configuration and initializes the TKE turbulence scheme.*/
+    /**
+ * @brief Initializes the TKE turbulence scheme.
+ */
     void initialize(const TurbulenceConfig& cfg) override;
 
-    /*This function computes the TKE turbulence scheme.
-    Takes in the configuration, grid, state, tendencies, and diagnostics and computes the TKE turbulence scheme.*/
+    /**
+ * @brief Computes the TKE turbulence scheme.
+ */
     void compute(
         const TurbulenceConfig& cfg,
         const GridMetrics& grid,
@@ -49,26 +63,29 @@ public:
 
 private:
     
-    /*This function computes the mixing length.
-    Takes in the configuration, grid, TKE, Brunt-Väisälä frequency, and the row, column, and level and computes the mixing length.*/
+    /**
+ * @brief Computes the mixing length.
+ */
     double compute_mixing_length(
         const TurbulenceConfig& cfg,
         const GridMetrics& grid,
-        double e,              // TKE
-        double N,              // Brunt-Väisälä frequency
+        double e,
+        double N,
         int i, int j, int k
     );
 
-    /*This function computes the eddy coefficients from the TKE.
-    Takes in the configuration, grid, and state and computes the eddy coefficients from the TKE.*/
+    /**
+ * @brief Computes the eddy coefficients from the TKE.
+ */
     void compute_eddy_coefficients_from_tke(
         const TurbulenceConfig& cfg,
         const GridMetrics& grid,
         const TurbulenceStateView& state
     );
 
-    /*This function updates the TKE prognostic equation.
-    Takes in the configuration, grid, state, and the TKE tendency and updates the TKE prognostic equation.*/
+    /**
+ * @brief Updates the TKE prognostic equation.
+ */
     void update_tke_prognostic(
         const TurbulenceConfig& cfg,
         const GridMetrics& grid,
@@ -76,8 +93,9 @@ private:
         Field3D& dtke_dt
     );
 
-    /*This function computes the TKE production.
-    Takes in the state, grid, the eddy viscosity, and the shear and buoyancy production and computes the TKE production.*/
+    /**
+ * @brief Computes the TKE production.
+ */
     void compute_tke_production(
         const TurbulenceStateView& state,
         const GridMetrics& grid,

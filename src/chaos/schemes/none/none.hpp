@@ -1,3 +1,12 @@
+/**
+ * @file none.hpp
+ * @brief Declarations for the chaos module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the chaos runtime and scheme implementations.
+ * This file is part of the src/chaos subsystem.
+ */
+
 #pragma once
 #include "chaos_base.hpp"
 
@@ -15,7 +24,6 @@ public:
 
     void initialize(const ChaosConfig& cfg, const GridMetrics& grid) override;
 
-    // IC perturbations - none applied
     void apply_initial_conditions(
         const ChaosConfig& cfg,
         const GridMetrics& grid,
@@ -23,7 +31,6 @@ public:
         ChaosDiagnostics* diag = nullptr
     ) override;
 
-    // Tendency perturbations - none applied
     void apply_tendencies(
         const ChaosConfig& cfg,
         const GridMetrics& grid,
@@ -32,7 +39,6 @@ public:
         ChaosDiagnostics* diag = nullptr
     ) override;
 
-    // No temporal evolution needed
     void step_noise(
         const ChaosConfig& cfg,
         const GridMetrics& grid,
@@ -40,4 +46,4 @@ public:
     ) override;
 };
 
-} // namespace chaos
+}

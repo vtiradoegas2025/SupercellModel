@@ -1,7 +1,16 @@
+/**
+ * @file initial_conditions.hpp
+ * @brief Declarations for the chaos module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the chaos runtime and scheme implementations.
+ * This file is part of the src/chaos subsystem.
+ */
+
 #pragma once
 #include "chaos_base.hpp"
-#include "../../base/random_generator.hpp"
-#include "../../base/correlation_filter.hpp"
+#include "chaos/base/random_generator.hpp"
+#include "chaos/base/correlation_filter.hpp"
 
 namespace chaos {
 
@@ -25,7 +34,6 @@ public:
         ChaosDiagnostics* diag = nullptr
     ) override;
 
-    // No tendency perturbations for IC-only scheme
     void apply_tendencies(
         const ChaosConfig& cfg,
         const GridMetrics& grid,
@@ -34,7 +42,6 @@ public:
         ChaosDiagnostics* diag = nullptr
     ) override;
 
-    // No temporal evolution needed
     void step_noise(
         const ChaosConfig& cfg,
         const GridMetrics& grid,
@@ -46,4 +53,4 @@ private:
     std::unique_ptr<CorrelationFilter> correlation_filter_;
 };
 
-} // namespace chaos
+}

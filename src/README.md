@@ -2,23 +2,23 @@
 
 This directory contains the main implementation of SupercellModel's atmospheric simulation framework. The code is organized by physics modules following a factory pattern for extensibility.
 
-## Core Files
+## Core Runtime Files
 
-### Main Simulation Components
-- **`equations.cpp`** - Core atmospheric equations and field management
-- **`dynamics.cpp`** - Dynamics module coordination and initialization
-- **`numerics.cpp`** - Numerical methods coordination
-- **`tornado_sim.cpp`** - Main simulation executable and configuration parsing
-- **`gui.cpp`** - Optional SFML-based graphical interface
+The runtime/coordinator translation units now live under `src/core/`:
 
-### Physics Module Coordinators
-- **`boundary_layer.cpp`** - Planetary boundary layer coordination
-- **`chaos.cpp`** - Stochastic perturbation coordination
-- **`microphysics.cpp`** - Microphysics coordination
-- **`radar.cpp`** - Radar forward operators coordination
-- **`radiation.cpp`** - Radiation coordination
-- **`terrain.cpp`** - Terrain/orography coordination
-- **`turbulence.cpp`** - Sub-grid turbulence coordination
+- **`core/tornado_sim.cpp`** - Main simulation executable and configuration parsing
+- **`core/equations.cpp`** - Core atmospheric equations and field management
+- **`core/dynamics.cpp`** - Dynamics module coordination and initialization
+- **`core/numerics.cpp`** - Numerical methods coordination
+- **`core/boundary_layer.cpp`** - Planetary boundary layer coordination
+- **`core/radiation.cpp`** - Radiation coordination
+- **`core/turbulence.cpp`** - Sub-grid turbulence coordination
+- **`core/radar.cpp`** - Radar forward operators coordination
+- **`core/terrain.cpp`** - Terrain/orography coordination
+- **`core/simd_utils.cpp`** - SIMD feature detection and vector utility implementations
+- **`core/gui.cpp`** - Optional SFML-based graphical interface
+
+Additional coordinator/factory entrypoints live in module directories (e.g. `chaos/`, `microphysics/`, `soundings/`).
 
 ## Module Organization
 
@@ -66,6 +66,8 @@ Implements controlled stochastic variability for ensemble forecasting.
 ### dynamics/ - Large-Scale Dynamics
 Handles compressible non-hydrostatic atmospheric dynamics.
 
+Configuration key: `dynamics.scheme` (default: `tornado`; also accepts aliases `axisymmetric` -> `tornado`, `mesocyclone` -> `supercell`).
+
 **Schemes:**
 - **`supercell/`** - Supercell-specific dynamics configuration
 - **`tornado/`** - Tornado-scale dynamics with enhanced resolution
@@ -108,6 +110,10 @@ Forward operators for radar observables from model state.
 
 **Base components:**
 - **`radar_base.cpp/.hpp`** - Common radar utilities and interfaces
+
+**Runtime integration:**
+- **`core/radar.cpp`** - High-level helper API and output sanitization
+- **`core/equations.cpp`** - Main timestep reflectivity path with guarded microphysics fallback
 
 ### radiation/ - Atmospheric Radiation
 Longwave and shortwave radiative transfer.
@@ -163,14 +169,15 @@ Parameterizes unresolved turbulent motions.
 - **SFML integration** for optional GUI (controlled by `GUI=1` make variable)
 
 ### Testing
-- **Integration tests** in `tests/test_integration.sh`
-- **Sounding tests** in `tests/test_soundings.cpp` (moved from `src/soundings/`)
-- **Manual verification** through visualization pipeline
+- **Guard/integration smoke tests** in `tests/test_guards.sh`
+- **Backend physics regression suite** in `tests/test_backend_physics.sh`
+- **Targeted module-level tests** are still limited and being expanded
+- **Renderer-facing verification** via `vulkan/` smoke paths
 
 ### Extension Points
 - **New physics schemes**: Add to appropriate `schemes/` subdirectory
 - **New modules**: Follow existing factory pattern structure
-- **Configuration**: Extend YAML parsing in `tornado_sim.cpp`
+- **Configuration**: Extend YAML parsing in `core/runtime_config.cpp`
 
 ### Performance Considerations
 - **Cylindrical coordinates** for efficient azimuthal symmetry

@@ -1,52 +1,62 @@
 #pragma once
-#include <vector>
-#include <memory>
-#include <string>
-#include "turbulence_base.hpp"
+
 #include <functional>
+#include <string>
+#include <vector>
 
-/*This header file contains the base classes and structures for the numerics module.
-The numerics module is responsible for the numerics of the simulation.
-The numerics scheme is chosen by the user in the configuration file.
-This module is used to compute the numerics of the simulation.*/
+#include "field3d.hpp"
 
+struct GridMetrics;
 
-// Numerics module constants
-namespace numerics_constants 
+/**
+ * @file numerics_base.hpp
+ * @brief Common numerics interfaces shared by advection, diffusion, and time stepping.
+ *
+ * Defines foundational data containers and the base polymorphic
+ * interface used by numerical schemes.
+ * This header keeps cross-module numerics contracts in one place.
+ */
+
+namespace numerics_constants
 {
-    inline constexpr double epsilon = 1e-12;        // small number for divisions
-    inline constexpr double weno_epsilon = 1e-6;    // WENO epsilon for smoothness
-    inline constexpr double cfl_target = 0.8;       // target CFL number
+inline constexpr double epsilon = 1e-12;
+inline constexpr double weno_epsilon = 1e-6;
+inline constexpr double cfl_target = 0.8;
 }
 
-// GridMetrics is defined in turbulence_base.hpp
-
-// Generic state vector for numerical operations
-struct NumericalState 
+struct NumericalState
 {
-    std::vector<std::vector<std::vector<double>>> data;  // 3D field data
-    std::string name;  // field name for diagnostics
+    Field3D data;
+    std::string name;
 };
 
-// Generic tendencies for numerical operations
-struct NumericalTendencies 
+struct NumericalTendencies
 {
-    std::vector<std::vector<std::vector<double>>> tendencies;  // 3D tendency data
-    std::string name;  // field name
+    Field3D tendencies;
+    std::string name;
 };
 
-// RHS function type for time stepping
-using RHSFunction = std::function<void(const std::vector<NumericalState>&, double,
-                                       std::vector<NumericalTendencies>&)>;
+using RHSFunction =
+    std::function<void(const std::vector<NumericalState>&, double, std::vector<NumericalTendencies>&)>;
 
-// Base interface for all numerical schemes
-class NumericalSchemeBase 
+class NumericalSchemeBase
 {
 public:
+    /**
+     * @brief Virtual destructor for polymorphic cleanup.
+     */
     virtual ~NumericalSchemeBase() = default;
+
+    /**
+     * @brief Returns the scheme identifier used for diagnostics.
+     * @return Scheme name.
+     */
     virtual std::string name() const = 0;
+
+    /**
+     * @brief Performs scheme-specific initialization.
+     */
     virtual void initialize() = 0;
 };
 
-// Global numerics configuration (set from YAML)
 extern GridMetrics global_grid_metrics;

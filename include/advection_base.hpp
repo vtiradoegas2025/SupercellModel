@@ -1,86 +1,108 @@
 #pragma once
-#include <vector>
+
 #include <memory>
 #include <string>
+#include <vector>
+
+#include "field3d.hpp"
 #include "numerics_base.hpp"
 
-/*This header file contains the base classes and structures for the advection module.
-The advection module is responsible for advecting the scalar fields in the simulation.
-The advection scheme is chosen by the user in the configuration file.
-This module is used to compute the advection of the simulation.*/
+/**
+ * @file advection_base.hpp
+ * @brief Base interfaces and shared state models for advection schemes.
+ *
+ * Defines runtime configuration and state views used by advection
+ * implementations.
+ * Exposes factory and initialization APIs for scheme selection.
+ */
 
-/*Advection module configuration*/
-struct AdvectionConfig 
+struct AdvectionConfig
 {
     std::string scheme_id = "tvd";
-    std::string formulation = "flux_form";  // "flux_form" or "advective_form"
-    std::string split_mode = "unsplit";     // "unsplit", "strang_split", "directional_split"
-    std::string limiter_id = "mc";          // TVD limiter: "minmod", "vanleer", "superbee", "mc", "universal"
-    bool positivity = false;                // enforce q >= 0 for tracers
+    std::string formulation = "flux_form";
+    std::string split_mode = "unsplit";
+    std::string limiter_id = "mc";
+    bool positivity = false;
+    double positivity_dt = 1.0;
     double cfl_target = numerics_constants::cfl_target;
-    std::string reconstruct_on = "q";       // "q" or "rhoq"
-    int weno_order = 5;                     // WENO order (5 for WENO5)
+    std::string reconstruct_on = "q";
+    int weno_order = 5;
 };
 
-/*State view for advection computations*/
-struct AdvectionStateView 
+struct AdvectionStateView
 {
-    // Velocity fields (cell-centered)
-    const std::vector<std::vector<std::vector<double>>>* u = nullptr;    // zonal wind [m/s]
-    const std::vector<std::vector<std::vector<double>>>* v = nullptr;    // meridional wind [m/s]
-    const std::vector<std::vector<std::vector<double>>>* w = nullptr;    // vertical wind [m/s]
-
-    // Tracer fields to advect
-    const std::vector<std::vector<std::vector<double>>>* q = nullptr;    // scalar field(s)
-    const std::vector<std::vector<std::vector<double>>>* rho = nullptr;  // density (optional)
-
-    // Grid information
+    const Field3D* u = nullptr;
+    const Field3D* v = nullptr;
+    const Field3D* w = nullptr;
+    const Field3D* q = nullptr;
+    const Field3D* rho = nullptr;
     const GridMetrics* grid = nullptr;
 };
 
-// Output tendencies from advection
-struct AdvectionTendencies 
+struct AdvectionTendencies
 {
-    std::vector<std::vector<std::vector<double>>> dqdt_adv;  // advection tendency [units/s]
+    Field3D dqdt_adv;
 };
 
-// Diagnostics for advection schemes
-struct AdvectionDiagnostics 
+struct AdvectionDiagnostics
 {
-    double max_cfl_x = 0.0;     // maximum CFL in x-direction
-    double max_cfl_y = 0.0;     // maximum CFL in y-direction
-    double max_cfl_z = 0.0;     // maximum CFL in z-direction
-    double suggested_dt = 0.0;  // suggested timestep for stability
-    std::vector<std::vector<std::vector<double>>> fluxes_x;  // x-fluxes (optional)
-    std::vector<std::vector<std::vector<double>>> fluxes_y;  // y-fluxes (optional)
-    std::vector<std::vector<std::vector<double>>> fluxes_z;  // z-fluxes (optional)
+    double max_cfl_x = 0.0;
+    double max_cfl_y = 0.0;
+    double max_cfl_z = 0.0;
+    double suggested_dt = 0.0;
+    Field3D fluxes_x;
+    Field3D fluxes_y;
+    Field3D fluxes_z;
 };
 
-/*Abstract base class for advection schemes*/
-class AdvectionSchemeBase : public NumericalSchemeBase 
+class AdvectionSchemeBase : public NumericalSchemeBase
 {
 public:
+    /**
+     * @brief Initializes the advection scheme.
+     * @param cfg Advection configuration.
+     */
     virtual void initialize(const AdvectionConfig& cfg) = 0;
 
-    //Compute the flux divergence of the scalar fields
-    virtual void compute_flux_divergence(
-        const AdvectionConfig& cfg,
-        const AdvectionStateView& state,
-        AdvectionTendencies& tendencies,
-        AdvectionDiagnostics* diag_opt = nullptr) = 0;
+    /**
+     * @brief Computes advection tendencies for the supplied state.
+     * @param cfg Advection configuration.
+     * @param state Read-only state view.
+     * @param tendencies Output tendency container.
+     * @param diag_opt Optional diagnostics output.
+     */
+    virtual void compute_flux_divergence(const AdvectionConfig& cfg,
+                                         const AdvectionStateView& state,
+                                         AdvectionTendencies& tendencies,
+                                         AdvectionDiagnostics* diag_opt = nullptr) = 0;
 
-    virtual double suggest_dt(
-        const AdvectionConfig& cfg,
-        const AdvectionStateView& state) = 0;
+    /**
+     * @brief Suggests a stable advection time step.
+     * @param cfg Advection configuration.
+     * @param state Read-only state view.
+     * @return Suggested advection time step in seconds.
+     */
+    virtual double suggest_dt(const AdvectionConfig& cfg, const AdvectionStateView& state) = 0;
 };
 
-// Factory function type
 using AdvectionSchemeFactory = std::unique_ptr<AdvectionSchemeBase> (*)(const AdvectionConfig&);
 
-// Global advection scheme instance and configuration declared in simulation.hpp
-
-// Factory and initialization functions
+/**
+ * @brief Creates an advection scheme by name.
+ * @param scheme_name Scheme identifier.
+ * @return Owning pointer to a scheme instance.
+ */
 std::unique_ptr<AdvectionSchemeBase> create_advection_scheme(const std::string& scheme_name);
+
+/**
+ * @brief Lists registered advection schemes.
+ * @return Collection of scheme identifiers.
+ */
 std::vector<std::string> get_available_advection_schemes();
-void initialize_advection(const std::string& scheme_name,
-                         const AdvectionConfig& cfg = AdvectionConfig{});
+
+/**
+ * @brief Initializes the global advection subsystem.
+ * @param scheme_name Scheme identifier.
+ * @param cfg Optional advection configuration.
+ */
+void initialize_advection(const std::string& scheme_name, const AdvectionConfig& cfg = AdvectionConfig{});

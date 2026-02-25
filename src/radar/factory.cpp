@@ -1,11 +1,21 @@
-#include "factory.hpp"
+/**
+ * @file factory.cpp
+ * @brief Implementation for the radar module.
+ *
+ * Provides executable logic for the radar runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/radar subsystem.
+ */
 
-// Include scheme implementations
+#include "factory.hpp"
+#include <stdexcept>
+
 #include "schemes/reflectivity/reflectivity.hpp"
 #include "schemes/velocity/velocity.hpp"
 #include "schemes/zdr/zdr.hpp"
-/*This function creates the radar scheme.
-Takes in the scheme id and creates the radar scheme.*/
+/**
+ * @brief Creates the radar scheme.
+ */
 
 std::unique_ptr<RadarSchemeBase> RadarFactory::create(const std::string& scheme_id) 
 {
@@ -27,8 +37,9 @@ std::unique_ptr<RadarSchemeBase> RadarFactory::create(const std::string& scheme_
     }
 }
 
-/*This function gets the available radar schemes.
-Takes in the available radar schemes.*/
+/**
+ * @brief Gets the available radar schemes.
+ */
 std::vector<std::string> RadarFactory::available_schemes() 
 {
     return {"reflectivity", "velocity", "zdr"};

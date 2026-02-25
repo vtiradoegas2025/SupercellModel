@@ -1,5 +1,14 @@
+/**
+ * @file soundings_base.hpp
+ * @brief Declarations for the soundings module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the soundings runtime and scheme implementations.
+ * This file is part of the src/soundings subsystem.
+ */
+
 #pragma once
-#include "../../../include/soundings_base.hpp"
+#include <soundings_base.hpp>
 
 /**
  * @brief Quality control for sounding data

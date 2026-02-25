@@ -1,7 +1,16 @@
+/**
+ * @file full_stochastic.hpp
+ * @brief Declarations for the chaos module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the chaos runtime and scheme implementations.
+ * This file is part of the src/chaos subsystem.
+ */
+
 #pragma once
 #include "chaos_base.hpp"
-#include "../../base/random_generator.hpp"
-#include "../../base/correlation_filter.hpp"
+#include "chaos/base/random_generator.hpp"
+#include "chaos/base/correlation_filter.hpp"
 
 namespace chaos {
 
@@ -44,17 +53,17 @@ private:
     ChaosRNG rng_;
     std::unique_ptr<CorrelationFilter> correlation_filter_;
 
-    // Evolving noise fields for each physics block
-    std::vector<std::vector<std::vector<double>>> xi_microphysics_;
-    std::vector<std::vector<std::vector<double>>> xi_pbl_;
-    std::vector<std::vector<std::vector<double>>> xi_diffusion_;
+    Field3D xi_microphysics_;
+    Field3D xi_pbl_;
+    Field3D xi_diffusion_;
 
-    // Previous timestep noise (for AR(1) evolution)
-    std::vector<std::vector<std::vector<double>>> xi_micro_prev_;
-    std::vector<std::vector<std::vector<double>>> xi_pbl_prev_;
-    std::vector<std::vector<std::vector<double>>> xi_diff_prev_;
+    Field3D xi_micro_prev_;
+    Field3D xi_pbl_prev_;
+    Field3D xi_diff_prev_;
+
+    std::vector<std::vector<double>> horizontal_slice_workspace_;
 
     uint64_t time_step_counter_ = 0;
 };
 
-} // namespace chaos
+}

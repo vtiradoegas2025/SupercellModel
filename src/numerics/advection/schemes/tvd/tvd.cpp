@@ -1,111 +1,161 @@
-#include "tvd.hpp"
-#include <cmath>
-#include <algorithm>
-#include <iostream>
+/**
+ * @file tvd.cpp
+ * @brief Implementation for the numerics module.
+ *
+ * Provides executable logic for the numerics runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/numerics subsystem.
+ */
 
-/*This constructor initializes the TVD scheme with a default limiter function.*/
+#include "tvd.hpp"
+#include "grid_metric_utils.hpp"
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <iostream>
+#include <limits>
+
+namespace
+{
+std::string canonicalize_limiter_id(std::string value)
+{
+    std::string canonical;
+    canonical.reserve(value.size());
+    for (unsigned char c : value)
+    {
+        if (c == '_' || c == '-' || std::isspace(c))
+        {
+            continue;
+        }
+        canonical.push_back(static_cast<char>(std::tolower(c)));
+    }
+    return canonical;
+}
+
+std::vector<double> build_vertical_spacing_column(const GridMetrics& grid, int i, int j, int nz)
+{
+    std::vector<double> dz_col(static_cast<std::size_t>(std::max(0, nz)), 1.0);
+    for (int k = 0; k < nz; ++k)
+    {
+        dz_col[static_cast<std::size_t>(k)] = grid_metric::local_dz(grid, i, j, k, nz);
+    }
+    return dz_col;
+}
+}
+
+/**
+ * @brief Initializes the TVD scheme with a default limiter function.
+ */
 TVDScheme::TVDScheme() : limiter_function_(nullptr) 
 {
 }
 
-/*This function initializes the TVD scheme with a default configuration.*/
+/**
+ * @brief Initializes the TVD scheme with a default configuration.
+ */
 void TVDScheme::initialize() 
 {
     initialize(AdvectionConfig{});
 }
 
-/*This function initializes the TVD scheme with a configuration.
-Takes in the configuration and initializes the TVD scheme with the configuration.*/
+/**
+ * @brief Initializes the TVD scheme with a configuration.
+ */
 void TVDScheme::initialize(const AdvectionConfig& cfg) 
 {
-    // Set the configuration.
     config_ = cfg;
+    const std::string limiter_id = canonicalize_limiter_id(cfg.limiter_id);
+    std::string selected_limiter = "mc";
 
-    // If the limiter id is minmod, set the limiter function to the minmod limiter function.
-    if (cfg.limiter_id == "minmod") 
+    if (limiter_id == "minmod") 
     {
         limiter_function_ = &minmod_limiter;
+        selected_limiter = "minmod";
     } 
 
-    // If the limiter id is vanleer, set the limiter function to the vanleer limiter function.
-    else if (cfg.limiter_id == "vanleer") 
+    else if (limiter_id == "vanleer") 
     {
         limiter_function_ = &vanleer_limiter;
+        selected_limiter = "vanleer";
     } 
     
-    // If the limiter id is superbee, set the limiter function to the superbee limiter function.
-    else if (cfg.limiter_id == "superbee") 
+    else if (limiter_id == "superbee") 
     {
         limiter_function_ = &superbee_limiter;
+        selected_limiter = "superbee";
     } 
 
-    // If the limiter id is mc, set the limiter function to the mc limiter function.
-    else if (cfg.limiter_id == "mc") 
+    else if (limiter_id == "mc") 
     {
         limiter_function_ = &mc_limiter;
+        selected_limiter = "mc";
     } 
     
-    // If the limiter id is universal, set the limiter function to the universal limiter function.
-    else if (cfg.limiter_id == "universal") {
+    else if (limiter_id == "universal") 
+    {
         limiter_function_ = &universal_limiter;
+        selected_limiter = "universal";
     } 
     else 
     {
         std::cerr << "Warning: Unknown limiter '" << cfg.limiter_id << "', using MC limiter" << std::endl;
         limiter_function_ = &mc_limiter;
+        selected_limiter = "mc";
     }
 
-    std::cout << "Initialized TVD advection scheme with " << cfg.limiter_id << " limiter" << std::endl;
+    config_.limiter_id = selected_limiter;
+    std::cout << "Initialized TVD advection scheme with " << selected_limiter << " limiter" << std::endl;
 }
 
-// TVD limiter functions
 
-/*This function computes the minmod limiter.
-Takes in the slope ratio and computes the minmod limiter.*/
+/**
+ * @brief Computes the minmod limiter.
+ */
 double TVDScheme::minmod_limiter(double r) 
 {
     return std::max(0.0, std::min(1.0, r));
 }
 
 
-/*This function computes the vanleer limiter.
-Takes in the slope ratio and computes the vanleer limiter.*/
+/**
+ * @brief Computes the vanleer limiter.
+ */
 double TVDScheme::vanleer_limiter(double r) 
 {
     return (std::abs(r) + r) / (1.0 + std::abs(r));
 }
 
 
-/*This function computes the superbee limiter.
-Takes in the slope ratio and computes the superbee limiter.*/
+/**
+ * @brief Computes the superbee limiter.
+ */
 double TVDScheme::superbee_limiter(double r) 
 {
     return std::max({0.0, std::min(1.0, 2.0 * r), std::min(2.0, r)});
 }
 
 
-/*This function computes the mc limiter.
-Takes in the slope ratio and computes the mc limiter.*/
+/**
+ * @brief Computes the mc limiter.
+ */
 double TVDScheme::mc_limiter(double r) 
 {
     return std::max(0.0, std::min({(1.0 + r) / 2.0, 2.0, 2.0 * r}));
 }
 
 
-/*This function computes the universal limiter.
-Takes in the slope ratio and computes the universal limiter.*/
+/**
+ * @brief Computes the universal limiter.
+ */
 double TVDScheme::universal_limiter(double r) 
 {
-    // Universal limiter (shape-preserving)
     double phi = 0.0;
 
-    // If the slope ratio is between 0 and 1, compute the universal limiter.
     if (r >= 0.0 && r <= 1.0) 
     {
         phi = std::min(2.0 * r, (1.0 + r) / 2.0);
     } 
 
-    // If the slope ratio is greater than 1, compute the universal limiter.
     else if (r > 1.0) 
     {
         phi = std::min(r, 2.0);
@@ -114,156 +164,143 @@ double TVDScheme::universal_limiter(double r)
 }
 
 
-/*This function computes the flux divergence.
-Takes in the configuration, state, tendencies, and diagnostics and computes the flux divergence.*/
-void TVDScheme::compute_flux_divergence(
-    const AdvectionConfig& cfg,
-    const AdvectionStateView& state,
+/**
+ * @brief Computes the flux divergence.
+ */
+void TVDScheme::compute_flux_divergence(const AdvectionConfig& cfg, const AdvectionStateView& state,
     AdvectionTendencies& tendencies,
     AdvectionDiagnostics* diag_opt
 ) 
 {
-    // If the state is invalid, throw an error.
-    if (!state.q || !state.grid) {throw std::runtime_error("Invalid state for TVD advection");}
+    if (!state.q || !state.grid || !state.w) {throw std::runtime_error("Invalid state for TVD advection");}
 
-    const int NR = state.q->size();
-    const int NTH = (*state.q)[0].size();
-    const int NZ = (*state.q)[0][0].size();
+    const int NR = state.q->size_r();
+    const int NTH = state.q->size_th();
+    const int NZ = state.q->size_z();
+    const double limiter_dt = (std::isfinite(cfg.positivity_dt) && cfg.positivity_dt > 0.0)
+        ? cfg.positivity_dt
+        : 1.0;
 
-    // Initialize tendencies
-    tendencies.dqdt_adv.assign(NR, std::vector<std::vector<double>>(
-        NTH, std::vector<double>(NZ, 0.0)));
+    tendencies.dqdt_adv.resize(NR, NTH, NZ, 0.0f);
 
     double max_cfl = 0.0;
 
-    // For each horizontal column, advect in vertical direction
-    // (This is a simplified implementation - full 3D would need directional splitting)
-    for (int i = 0; i < NR; ++i) {
-        for (int j = 0; j < NTH; ++j) {
-            // Extract 1D column data
+    for (int i = 0; i < NR; ++i) 
+    {
+        for (int j = 0; j < NTH; ++j) 
+        {
             std::vector<double> q_col(NZ);
             std::vector<double> w_col(NZ);
-            for (int k = 0; k < NZ; ++k) {
-                q_col[k] = (*state.q)[i][j][k];
-                w_col[k] = (*state.w)[i][j][k];
+            for (int k = 0; k < NZ; ++k) 
+            {
+                q_col[k] = static_cast<double>((*state.q)[i][j][k]);
+                w_col[k] = static_cast<double>((*state.w)[i][j][k]);
             }
+            const std::vector<double> dz_col = build_vertical_spacing_column(*state.grid, i, j, NZ);
 
-            // Compute vertical advection
             std::vector<double> dqdt_col(NZ, 0.0);
-            advect_1d(q_col, w_col, state.grid->dz[0], 1.0, dqdt_col);  // dt=1.0 for tendency
+            advect_1d(q_col, w_col, dz_col, limiter_dt, dqdt_col);
 
-            // Iterate over the vertical levels and store the tendencies.
             for (int k = 0; k < NZ; ++k) 
             {
-                tendencies.dqdt_adv[i][j][k] = dqdt_col[k];
+                tendencies.dqdt_adv[i][j][k] = static_cast<float>(dqdt_col[k]);
             }
 
-            //Iterate over the vertical levels and compute the CFL.
             for (int k = 0; k < NZ; ++k) 
             {
-                double cfl = std::abs(w_col[k]) / state.grid->dz[k];
+                const double dz_k = dz_col[static_cast<std::size_t>(k)];
+                double cfl = std::abs(w_col[k]) / std::max(dz_k, 1.0e-6);
                 max_cfl = std::max(max_cfl, cfl);
             }
         }
     }
 
-    // If the diagnostics are requested, store the maximum CFL and the suggested time step.
     if (diag_opt) 
     {
         diag_opt->max_cfl_z = max_cfl;
-        diag_opt->suggested_dt = cfg.cfl_target * state.grid->dz[0] / max_cfl;
+        diag_opt->suggested_dt = (max_cfl > 1.0e-12)
+            ? (cfg.cfl_target / max_cfl)
+            : std::numeric_limits<double>::infinity();
     }
 }
 
 
-/*This function suggests the time step.
-Takes in the configuration and state and suggests the time step.*/
-double TVDScheme::suggest_dt(
-    const AdvectionConfig& cfg,
-    const AdvectionStateView& state
-) 
+/**
+ * @brief Suggests the time step.
+ */
+double TVDScheme::suggest_dt(const AdvectionConfig& cfg, const AdvectionStateView& state) 
 {
-    // If the grid is invalid, return 1.0.
-    if (!state.grid) return 1.0;
+    if (!state.grid || !state.q) return 1.0;
 
-    const int NR = state.q->size();
-    const int NTH = (*state.q)[0].size();
-    const int NZ = (*state.q)[0][0].size();
+    const int NR = state.q->size_r();
+    const int NTH = state.q->size_th();
+    const int NZ = state.q->size_z();
 
     double max_cfl = 0.0;
-
-    // Iterate over the horizontal columns and compute the CFL in all directions.
     for (int i = 0; i < NR; ++i) 
     {
-        // Iterate over the horizontal columns and compute the CFL in the x direction.
         for (int j = 0; j < NTH; ++j) 
         {
-            // Iterate over the vertical levels and compute the CFL in the z direction.
             for (int k = 0; k < NZ; ++k) 
             {
-                // If the u velocity is valid, compute the CFL in the x direction.
                 if (state.u) 
                 {
-                    double cfl_x = std::abs((*state.u)[i][j][k]) / state.grid->dx;
+                    const double dx_local = grid_metric::local_dx(*state.grid, i, j, k);
+                    double cfl_x = std::abs(static_cast<double>((*state.u)[i][j][k])) / std::max(dx_local, 1.0e-6);
                     max_cfl = std::max(max_cfl, cfl_x);
                 }
 
-                // If the v velocity is valid, compute the CFL in the y direction.
                 if (state.v) 
                 {
-                    double cfl_y = std::abs((*state.v)[i][j][k]) / state.grid->dy;
+                    const double dy_local = grid_metric::local_dy(*state.grid, i, j, k);
+                    double cfl_y = std::abs(static_cast<double>((*state.v)[i][j][k])) / std::max(dy_local, 1.0e-6);
                     max_cfl = std::max(max_cfl, cfl_y);
                 }
 
-                // If the w velocity is valid, compute the CFL in the z direction.
                 if (state.w) 
                 {
-                    double cfl_z = std::abs((*state.w)[i][j][k]) / state.grid->dz[k];
+                    const double dz_k = grid_metric::local_dz(*state.grid, i, j, k, NZ);
+                    double cfl_z = std::abs(static_cast<double>((*state.w)[i][j][k])) / std::max(dz_k, 1.0e-6);
                     max_cfl = std::max(max_cfl, cfl_z);
                 }
             }
         }
     }
 
-    return cfg.cfl_target / max_cfl;
+    return (max_cfl > 1.0e-12) ? (cfg.cfl_target / max_cfl) : 1.0;
 }
 
 
-/*This function performs the MUSCL reconstruction.
-Takes in the state, and the limiter function and performs the MUSCL reconstruction.*/
-void TVDScheme::muscl_reconstruct(
-    const std::vector<double>& q,
-    std::vector<double>& q_left,
-    std::vector<double>& q_right,
-    double (*limiter)(double)
-) 
+/**
+ * @brief Performs the MUSCL reconstruction.
+ */
+void TVDScheme::muscl_reconstruct(const std::vector<double>& q, std::vector<double>& q_left,
+    std::vector<double>& q_right, double (*limiter)(double)) 
 {
-    // Get the number of grid points.
     const int n = q.size();
+    if (n == 0)
+    {
+        q_left.clear();
+        q_right.clear();
+        return;
+    }
 
-    // Resize the left and right states.
     q_left.resize(n);
     q_right.resize(n);
 
-    // Iterate over the grid points and perform the MUSCL reconstruction.
     for (int i = 1; i < n - 1; ++i) 
     {
-        // Compute slope ratio r
         double denominator = q[i+1] - q[i] + numerics_constants::epsilon;
         double r = (q[i] - q[i-1]) / denominator;
 
-        // Apply limiter
         double phi = limiter(r);
 
-        // Compute limited slope
         double delta_q = phi * (q[i+1] - q[i]);
 
-        // Reconstruct left and right states
         q_left[i] = q[i] - 0.5 * delta_q;
         q_right[i] = q[i] + 0.5 * delta_q;
     }
 
-    // Boundary conditions (first-order upwind)
     q_left[0] = q[0];
     q_right[0] = q[0];
     q_left[n-1] = q[n-1];
@@ -271,11 +308,11 @@ void TVDScheme::muscl_reconstruct(
 }
 
 
-/*This function computes the numerical flux.
-Takes in the left and right states and the velocity and computes the numerical flux.*/
+/**
+ * @brief Computes the numerical flux.
+ */
 double TVDScheme::numerical_flux(double q_left, double q_right, double velocity) 
 {
-    // If the velocity is positive, compute the upwind flux.
     if (velocity >= 0.0) 
     {
         return velocity * q_left;
@@ -286,52 +323,67 @@ double TVDScheme::numerical_flux(double q_left, double q_right, double velocity)
     }
 }
 
-/*This function advects the 1D field.
-Takes in the state, the velocity, the grid spacing, the time step, 
-and the tendencies and advects the 1D field.*/
-void TVDScheme::advect_1d(
-    const std::vector<double>& q,
-    const std::vector<double>& velocity,
-    double dx, double dt,
-    std::vector<double>& dqdt
-) 
+/**
+ * @brief Advects the 1D field.
+ */
+void TVDScheme::advect_1d(const std::vector<double>& q,const std::vector<double>& velocity, const std::vector<double>& dx,
+     double dt,std::vector<double>& dqdt) 
 {
     const int n = q.size();
     dqdt.assign(n, 0.0);
+    if (n == 0)
+    {
+        return;
+    }
+    auto dx_at = [&](int idx) -> double
+    {
+        if (idx >= 0 && idx < static_cast<int>(dx.size()))
+        {
+            return std::max(std::abs(dx[static_cast<std::size_t>(idx)]), 1.0e-6);
+        }
+        return 1.0;
+    };
 
-    // MUSCL reconstruction
     std::vector<double> q_left, q_right;
     muscl_reconstruct(q, q_left, q_right, limiter_function_);
 
-    // Iterate over the grid points and compute the fluxes and tendencies.
     for (int i = 0; i < n - 1; ++i) 
     {
-        // Flux at interface i+1/2
         double flux_right = numerical_flux(q_right[i], q_left[i+1], velocity[i]);
         double flux_left = (i > 0) ? numerical_flux(q_right[i-1], q_left[i], velocity[i-1]) : 0.0;
 
-        // Flux divergence
-        double dflux_dx = (flux_right - flux_left) / dx;
+        double dflux_dx = (flux_right - flux_left) / dx_at(i);
 
-        // Tendency
         dqdt[i] -= dflux_dx;
     }
 
-    // If the positivity limiter is enabled, apply the positivity limiter.
     if (config_.positivity) 
     {
-        apply_positivity_limiter(dqdt);
+        apply_positivity_limiter(q, dqdt, dt);
     }
 }
 
 
-/*This function applies the positivity limiter.
-Takes in the state and the minimum value and applies the positivity limiter.*/
-void TVDScheme::apply_positivity_limiter(std::vector<double>& q, double min_value) 
+/**
+ * @brief Applies the positivity limiter.
+ */
+void TVDScheme::apply_positivity_limiter(const std::vector<double>& q, std::vector<double>& dqdt, double dt, double min_value) 
 {
-    // Iterate over the grid points and apply the positivity limiter.
-    for (auto& val : q) 
+    const std::size_t count = std::min(q.size(), dqdt.size());
+    const double dt_safe = std::max(std::abs(dt), 1.0e-12);
+
+    for (std::size_t idx = 0; idx < count; ++idx)
     {
-        val = std::max(val, min_value);
+        double tendency = dqdt[idx];
+        if (!std::isfinite(tendency))
+        {
+            tendency = 0.0;
+        }
+        const double floor_tendency = (min_value - q[idx]) / dt_safe;
+        if (tendency < floor_tendency)
+        {
+            tendency = floor_tendency;
+        }
+        dqdt[idx] = tendency;
     }
 }

@@ -1,64 +1,99 @@
+/**
+ * @file topography.hpp
+ * @brief Declarations for the terrain module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the terrain runtime and scheme implementations.
+ * This file is part of the src/terrain subsystem.
+ */
+
 #pragma once
 #include "terrain_base.hpp"
 
-/*This file contains the declaration of the topography module.
-It manages the evaluation of the topography and the initialization of the topography.
-Commented out code is for the future and was having issues with the compilation. with 
-binary operator issues.*/
 
-// Topography generation and coordinate utilities
 namespace topography {
 
-// Evaluate bell-shaped mountain/ridge
+/**
+ * @brief Terrain height and gradients for a 2D bell mountain profile.
+ */
 struct BellResult {
-    double h;   // height [m]
-    double hx;  // dh/dx [m/m]
-    double hy;  // dh/dy [m/m]
+    double h;
+    double hx;
+    double hy;
 };
 
+/**
+ * @brief Evaluates bell-mountain topography and first derivatives.
+ */
 BellResult eval_bell(double x, double y, const TerrainConfig::BellParams& params);
 
-// Evaluate Schär mountain (MWR 2002 test case)
+/**
+ * @brief Terrain height and radial gradient for Schar topography.
+ */
 struct ScharResult {
-    double h;   // height [m]
-    double hx;  // dh/dx [m/m]
+    double h;
+    double hx;
 };
 
+/**
+ * @brief Evaluates Schar topography and first radial derivative.
+ */
 ScharResult eval_schar(double x, const TerrainConfig::ScharParams& params);
 
-// Terrain-following coordinate transformations
+/**
+ * @brief Terrain-following coordinate transforms and metric evaluation.
+ */
 class TerrainFollowingCoordinate {
 private:
     TerrainConfig config_;
     Topography2D topography_;
 
 public:
+    /**
+     * @brief Constructs a coordinate transform from config and topography.
+     */
     TerrainFollowingCoordinate(const TerrainConfig& cfg, const Topography2D& topo);
 
-    // Transform from terrain-following ζ to physical z
+    /**
+     * @brief Maps terrain-following height coordinate to physical height.
+     */
     double zeta_to_z(double zeta, int i, int j) const;
 
-    // Transform from physical z to terrain-following ζ
+    /**
+     * @brief Maps physical height to terrain-following height coordinate.
+     */
     double z_to_zeta(double z, int i, int j) const;
 
-    // Compute metric terms at a grid point
+    /**
+     * @brief Computes physical height and metric terms at one horizontal point.
+     */
     void compute_metrics(double zeta, int i, int j,
                         double& z, double& J, double& mx, double& my) const;
 
-    // Smoothed coordinate surfaces (optional)
+    /**
+     * @brief Applies configured terrain smoothing to coordinate deformation.
+     */
     double apply_coordinate_smoothing(double h, double zeta) const;
 };
 
-// Initialize 2D topography field
+/**
+ * @brief Initializes topography height and slope arrays.
+ */
 void initialize_topography(Topography2D& topo, int NR, int NTH);
 
-// Initialize 3D metrics field
+/**
+ * @brief Initializes terrain metric tensors and Jacobians.
+ */
 void initialize_metrics(TerrainMetrics3D& metrics, int NR, int NTH, int NZ);
 
-// Build vertical coordinate levels (ζ)
+/**
+ * @brief Builds uniformly distributed terrain-following levels up to `ztop`.
+ */
 std::vector<double> build_zeta_levels(int NZ, double ztop);
 
-// Check coordinate validity (no folding)
+/**
+ * @brief Validates terrain metrics and populates diagnostic status.
+ */
 bool check_coordinate_validity(const TerrainMetrics3D& metrics, TerrainDiagnostics& diag);
 
-} // namespace topography
+}

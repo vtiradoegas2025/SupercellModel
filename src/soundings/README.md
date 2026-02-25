@@ -21,9 +21,10 @@ src/soundings/
 
 ## Features
 
-- **Multiple data formats**: Support for SHARPY HDF5 and NetCDF files
+- **Multiple data formats**: SHARPY-style ingestion with native NetCDF classic support and extractor fallback for HDF5/NetCDF4
 - **Quality control**: Automatic validation and filtering of sounding data
-- **Interpolation**: Linear interpolation to model grid heights
+- **Optional-field safety**: Incomplete dewpoint/wind vectors are discarded during QC/interpolation to avoid mismatched profile application
+- **Interpolation**: Linear, monotone spline (PCHIP-style), and log-linear (pressure) interpolation to model grid heights
 - **Fallback support**: Graceful degradation to procedural profiles
 - **Extensible design**: Easy to add new sounding formats
 
@@ -100,60 +101,61 @@ SHARPY is a Python package for analyzing atmospheric sounding data. This module 
 - ✅ Factory pattern and API
 - ✅ Quality control and validation
 - ✅ Linear interpolation
-- ✅ Sample sounding generator for testing
+- ✅ Monotone spline interpolation (PCHIP-style)
+- ✅ Log-linear pressure interpolation
+- ✅ Native in-process NetCDF classic reader path (CDF1/CDF2), including record-variable layouts
+- ✅ Python-backed SHARPY extractor (`sharpy_extract.py`) fallback path for HDF5/NetCDF4 and unsupported NetCDF layouts
 - ✅ Integration examples and documentation
 
-### Placeholder (Needs Library Dependencies)
-- 🔄 HDF5 file reading (requires libhdf5)
-- 🔄 NetCDF file reading (requires libnetcdf)
-- 🔄 Spline interpolation (requires math library)
+### Still Incomplete / Deferred
+- 🔄 Native in-process HDF5/NetCDF4 readers (current path falls back to Python extractor)
 
 ## Dependencies
 
-### Required for Full Functionality
-- **HDF5**: For reading SHARPY HDF5 files
-  - Ubuntu: `sudo apt-get install libhdf5-dev`
-  - macOS: `brew install hdf5`
-- **NetCDF**: For reading NetCDF files
-  - Ubuntu: `sudo apt-get install libnetcdf-dev`
-  - macOS: `brew install netcdf`
+### Runtime Dependencies
+- **No Python dependency required** for native NetCDF classic (CDF1/CDF2) path
+- **Python 3 + numpy + xarray + backend** are required for fallback ingestion paths:
+  - **scipy**: NetCDF3 fallback
+  - **h5py/h5netcdf/netCDF4**: HDF5 / NetCDF4 fallback
 
 ### Build Integration
 
-Add to Makefile:
-```makefile
-SRC += src/soundings/soundings.cpp \
-       src/soundings/factory.cpp \
-       src/soundings/base/soundings_base.cpp \
-       src/soundings/schemes/sharpy/sharpy_sounding.cpp
-
-INCLUDE += -Iinclude
-
-# Add when libraries are available:
-# LIBS += -lhdf5 -lnetcdf
-```
+No additional C++ link-time libraries are required for current ingestion path.
 
 ## Testing
 
-The module includes a sample sounding generator for testing without external files. To test with real SHARPY data:
+Run focused soundings regression tests:
 
-1. Install SHARPY: `pip install sharpy`
-2. Create a sounding file in Python:
+```bash
+make test-soundings
+```
+
+To test with a synthetic NetCDF profile:
+
+1. Create a file:
    ```python
-   import sharpy
    import numpy as np
+   import xarray as xr
 
-   # Load or create sounding data
-   sounding = sharpy.Sounding(...)  # Your sounding data
-
-   # Export to HDF5
-   sounding.to_hdf('sounding.h5')
+   z = np.array([0, 500, 1000, 1500, 2000], dtype=float)
+   ds = xr.Dataset(
+       data_vars={
+           "height_m": (("level",), z),
+           "pressure_hpa": (("level",), np.array([1000, 950, 900, 850, 800], dtype=float)),
+           "temperature_k": (("level",), np.array([300, 296, 292, 288, 284], dtype=float)),
+           "dewpoint_k": (("level",), np.array([294, 290, 286, 282, 278], dtype=float)),
+           "wind_speed_ms": (("level",), np.array([5, 8, 11, 14, 17], dtype=float)),
+           "wind_direction_deg": (("level",), np.array([180, 190, 200, 210, 220], dtype=float)),
+       },
+       attrs={"station_id": "KTEST"}
+   )
+   ds.to_netcdf("sounding.nc", engine="scipy")
    ```
-3. Use in SupercellModel configuration
+2. Point `environment.sounding.file_path` at that file and run headless.
 
 ## Future Enhancements
 
-- Additional interpolation methods (spline, log-linear)
+- Native C++ HDF5/NetCDF4 readers (avoid Python fallback path)
 - Support for multiple sounding sources
 - Sounding data assimilation
 - Real-time sounding updates

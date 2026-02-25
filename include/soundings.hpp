@@ -1,48 +1,50 @@
 #pragma once
+
 #include "soundings_base.hpp"
 
-
-/*This header file contains the functions for the soundings module.
-The soundings module is responsible for the soundings of the simulation.
-The soundings scheme is chosen by the user in the configuration file.
-This module is used to get the soundings of the simulation.
-This module is a placeholder for now and will be implemented in the future.*/
+/**
+ * @file soundings.hpp
+ * @brief Public API for sounding initialization and interpolation.
+ *
+ * Provides convenience wrappers around the configured sounding scheme.
+ * These functions are used during model initialization to load and
+ * remap atmospheric profiles to model vertical levels.
+ */
 
 /**
- * @brief Initialize the atmospheric sounding system
- * @param config Sounding configuration
+ * @brief Initializes the sounding subsystem.
+ * @param config Runtime sounding configuration.
  */
 void initialize_soundings(const SoundingConfig& config);
 
 /**
- * @brief Load sounding data for model initialization
- * @return SoundingData structure, or empty if failed and fallback disabled
+ * @brief Loads raw sounding data from the configured source.
+ * @return Loaded sounding profile and metadata.
  */
 SoundingData load_sounding_data();
 
 /**
- * @brief Interpolate sounding data to model grid heights
- * @param sounding Original sounding data
- * @param model_heights Vector of model grid heights (m)
- * @return Interpolated SoundingData at model levels
+ * @brief Interpolates a sounding profile onto model heights.
+ * @param sounding Input sounding profile.
+ * @param model_heights Target model heights in meters.
+ * @return Interpolated sounding profile.
  */
-SoundingData interpolate_sounding_to_grid(
-    const SoundingData& sounding,
-    const std::vector<double>& model_heights);
+SoundingData interpolate_sounding_to_grid(const SoundingData& sounding,
+                                          const std::vector<double>& model_heights);
 
 /**
- * @brief Get current sounding configuration
- * @return Reference to current configuration
+ * @brief Returns the active sounding configuration.
+ * @return Immutable reference to current sounding config.
  */
 const SoundingConfig& get_sounding_config();
 
 /**
- * @brief Check if sounding system is initialized
- * @return true if ready to use
+ * @brief Reports whether the sounding subsystem has been initialized.
+ * @return True when initialization has completed successfully.
  */
 bool is_soundings_initialized();
 
 /**
- * @brief Reset sounding system
+ * @brief Resets sounding subsystem state.
  */
 void reset_soundings();

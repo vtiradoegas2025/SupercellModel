@@ -1,17 +1,20 @@
-#include "../include/soundings_base.hpp"
+/**
+ * @file soundings.cpp
+ * @brief Implementation for the soundings module.
+ *
+ * Provides executable logic for the soundings runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/soundings subsystem.
+ */
+
+#include "soundings_base.hpp"
 #include "factory.hpp"
 #include <iostream>
 #include <memory>
 
-/*This file contains the implementation of the atmospheric sounding module.
-It manages loading and interpolation of atmospheric profile data from
-external sources like SHARPY soundings for use in model initialization. This is a placeholder file for the future.
-*/
 
-// Global sounding scheme instance
 std::unique_ptr<SoundingScheme> sounding_scheme = nullptr;
 
-// Global sounding configuration
 SoundingConfig global_sounding_config;
 
 /**

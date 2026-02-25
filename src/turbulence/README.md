@@ -1,243 +1,112 @@
 # Sub-Grid Turbulence Module
 
-This module implements parameterizations for unresolved turbulent motions in large-eddy simulations (LES) and convection-permitting models.
+This module computes sub-grid-scale (SGS) momentum and scalar mixing tendencies
+for the backend solver.
 
 ## Overview
 
-Sub-grid scale (SGS) turbulence parameterizations account for the effects of eddies smaller than the model grid spacing. These schemes provide:
+Implemented closures:
+- `smagorinsky`: algebraic eddy-viscosity closure
+- `tke`: prognostic TKE closure
 
-- **Energy dissipation**: Conversion of kinetic energy to heat
-- **Momentum mixing**: Vertical transport of horizontal momentum
-- **Scalar transport**: Mixing of heat, moisture, and other tracers
-- **Length scales**: Turbulent mixing based on grid resolution
+Primary outputs:
+- momentum SGS tendencies (`dudt_sgs`, `dvdt_sgs`, `dwdt_sgs`)
+- scalar SGS tendencies (`dthetadt_sgs`, optional `dqvdt_sgs`)
+- TKE tendency (`dtkedt_sgs`, TKE scheme)
 
-## Architecture
+## Code Layout
 
-```
-src/turbulence/
-├── turbulence.cpp            # Module coordinator
-├── factory.cpp/.hpp          # Scheme factory
-├── base/
-│   └── eddy_viscosity.cpp/.hpp # Common turbulence utilities
-└── schemes/                  # SGS implementations
-    ├── smagorinsky/          # Eddy-viscosity model
-    └── tke/                  # Prognostic TKE
-```
-
-## Turbulence Fundamentals
-
-### Eddy Viscosity Concept
-
-Turbulent stresses are parameterized using an eddy viscosity ν_t:
-
-```
--ρ <u_i' u_j'> = ρ ν_t (∂U_i/∂x_j + ∂U_j/∂x_i - (2/3)δ_ij ∂U_k/∂x_k)
+```text
+src/core/turbulence.cpp                    # runtime coordinator, cadence, guards
+src/turbulence/factory.cpp/.hpp            # scheme construction
+src/turbulence/base/eddy_viscosity.cpp/.hpp
+src/turbulence/schemes/smagorinsky/*.cpp
+src/turbulence/schemes/tke/*.cpp
 ```
 
-Where ν_t is computed from SGS kinetic energy and length scales.
+## Runtime Coupling
 
-### Turbulent Kinetic Energy (TKE)
+1. `initialize_turbulence(...)` is called from
+   `src/core/tornado_sim.cpp`.
+2. `step_turbulence(...)` is called from `src/core/dynamics.cpp`.
+3. Chaos perturbations can modify SGS tendencies through
+   `apply_chaos_to_turbulence_tendencies(...)`.
+4. SGS tendencies are added to resolved state tendencies in the dynamics step.
+5. For TKE updates, `src/core/dynamics.cpp` applies
+   `dtkedt_sgs + dtke_dt_pbl` to the shared `tke` field.
 
-The prognostic TKE equation describes SGS energy evolution:
+## Scheme Notes
 
-```
-d(tke)/dt = P + B - ε + T + transport
-```
+### Smagorinsky
 
-Where:
-- **P**: Shear production (-u_i'u_j' ∂U_i/∂x_j)
-- **B**: Buoyancy production (β θ' w')
-- **ε**: Dissipation (c_ε tke^{3/2}/l)
-- **T**: Transport terms
-- **β**: Buoyancy parameter (g/θ_0)
+- Uses `nu_t = (Cs * Delta)^2 * |S|`.
+- Optional Richardson-based stability correction (`ri`).
+- Computes `K_theta` and `K_q` from `Pr_t` and `Sc_t`.
 
-## Scheme Implementations
+### TKE
 
-### Smagorinsky-Lilly Eddy Viscosity
+- Uses `nu_t = c_k * l * sqrt(e)`.
+- Prognostic tendency form:
+  - `dtke = P_s + P_b - eps + diffusion`
+- Reads the shared runtime `tke` field when available, so closure and model
+  state remain synchronized.
+- Uses a simple vertical second-derivative term for TKE diffusion.
 
-**Concept**: Local equilibrium between production and dissipation
+## Grid and Metrics
 
-**Eddy viscosity:**
-```cpp
-ν_t = (C_s Δ)² √(2 S_ij S_ij) × Φ(z/L)
-```
-
-Where:
-- C_s = 0.18 (Smagorinsky constant)
-- Δ = (Δx Δy Δz)^{1/3} (grid length scale)
-- S_ij = (1/2)(∂U_i/∂x_j + ∂U_j/∂x_i) (strain rate tensor)
-- Φ(z/L) = stability correction function
-
-**Features:**
-- **Algebraic**: No prognostic equations
-- **Local**: Depends only on local gradients
-- **Stable**: Conservative and numerically robust
-
-### Prognostic TKE Scheme
-
-**TKE Equation:**
-```cpp
-∂(e)/∂t = -u_i'∂U_i/∂x_j u_j' + β θ' w' - c_ε e^{3/2}/l + ∂/∂x_j [(ν_t + ν) ∂e/∂x_j]
-```
-
-**Length Scale Determination:**
-```cpp
-l = min(l_max, κ z / (1 + κ z / l_max))  // Near-wall
-l = min(l_max, c_l √(e)/N)               // Buoyancy-limited
-```
-
-Where:
-- e: SGS TKE (m²/s²)
-- l: Mixing length (m)
-- N: Brunt-Väisälä frequency (s⁻¹)
-- κ = 0.4: von Kármán constant
-
-**Eddy Viscosity:**
-```cpp
-ν_t = c_μ √(e) l
-```
-
-With c_μ = 0.1 calibrated for neutral conditions.
-
-## Turbulence Closure
-
-### Near-Wall Treatment
-
-**Law of the wall** for surface layer:
-```cpp
-u(z) = (u_*/κ) ln(z/z0)    // Logarithmic profile
-```
-
-**Mixing length** in surface layer:
-```cpp
-l = κ z (1 - z/δ)²         // Damped near surface
-```
-
-### Stability Corrections
-
-**Monin-Obukhov similarity** for stable/unstable regimes:
-```cpp
-Φ_m(ζ) = 1 + β ζ for stable (ζ > 0)
-Φ_m(ζ) = (1 - γ ζ)^{-1/4} for unstable (ζ < 0)
-```
-
-Where ζ = z/L (stability parameter), L = -u_*^3 θ_0 / (κ g Q_0)
+- Turbulence uses `global_grid_metrics` when available; otherwise it builds a
+  fallback grid from `dr`, `dtheta`, and `dz`.
+- Local `dx`, `dy`, and `dz` come from `grid_metric_utils.hpp`.
+- Brunt-Vaisala frequency and diffusion terms use local vertical spacing
+  (terrain-aware when terrain metrics are active).
 
 ## Configuration
 
-### Scheme Selection
+Example:
+
 ```yaml
 turbulence:
-  scheme: "smagorinsky"    # smagorinsky, tke
-  dt_sgs: 1.0              # SGS time step (s)
-  Cs: 0.18                 # Smagorinsky constant
-  Pr_t: 1.0                # Turbulent Prandtl number
+  scheme: tke                # smagorinsky | tke
+  dt_sgs: 1.0                # > 0 (alias: turbulence.dt)
+  Cs: 0.18                   # >= 0
+  Pr_t: 0.7                  # > 0
+  Sc_t: 0.7                  # > 0
+  nu_t_max: 1000.0           # >= 0
+  K_max: 1000.0              # >= 0
+  mode: 3d                   # 3d | horizontal_only | vertical_only
+  filter_width: cubic_root   # dx | cubic_root | user
+  stability_correction: none # none | ri | tke_based
+  dynamic_Cs: false
+  enable_moist_buoyancy: false
+  enable_diagnostics: false
 ```
 
-### Advanced Parameters
-```yaml
-turbulence:
-  smagorinsky:
-    stability_correction: true
-    dynamic_procedure: false    # Dynamic Smagorinsky-Lilly
+Supported aliases:
+- `turbulence.dt` for `turbulence.dt_sgs`
+- `turbulence.smagorinsky.filter_width`
+- `turbulence.smagorinsky.stability_correction`
+- `turbulence.smagorinsky.dynamic_procedure`
+- `smag`, `smagorinsky-lilly` accepted as scheme aliases
+- `1.5`, `1.5-order` accepted as `tke` aliases
 
-  tke:
-    c_mu: 0.1                  # Eddy viscosity constant
-    c_eps: 0.7                 # Dissipation constant
-    l_max: 100.0               # Maximum mixing length (m)
-    e_min: 1e-6                # Minimum TKE (m²/s²)
-```
+## Validation and Guarding
 
-## Implementation Details
+Recommended checks:
 
-### Grid-Level Application
-
-**Momentum tendencies:**
-```cpp
-du/dt = ∂/∂z (ν_t ∂u/∂z) + ∂/∂z (ν_t ∂w/∂x)
-dv/dt = ∂/∂z (ν_t ∂v/∂z) + ∂/∂z (ν_t ∂w/∂y)
-dw/dt = ∂/∂z (ν_t ∂w/∂z) - ∂/∂z (ν_t ∂u/∂x) - ∂/∂z (ν_t ∂v/∂y)
-```
-
-**Scalar tendencies:**
-```cpp
-dθ/dt = ∂/∂z (ν_t/Pr_t ∂θ/∂z)
-dq/dt = ∂/∂z (ν_t/Pr_t ∂q/∂z)
-```
-
-### Boundary Conditions
-
-**Surface fluxes** computed from MOST:
-```cpp
-τ = -ρ u_*² = ρ ν_t |∂U/∂z|  (momentum flux)
-H = -ρ c_p u_* θ_* = ρ c_p ν_t/Pr_t ∂θ/∂z  (heat flux)
-E = -ρ u_* q_* = ρ ν_t/Pr_t ∂q/∂z  (moisture flux)
-```
-
-**Top boundary**: ν_t = 0 (free slip, zero flux)
-
-### Numerical Stability
-
-**Time step limitations:**
-```cpp
-Δt_turb ≤ C * (Δz)² / ν_t_max
-```
-
-**Implicit treatment** for stiff near-surface gradients:
-```cpp
-// Crank-Nicolson for vertical diffusion
-θ^{n+1} - θ^n = (Δt/2) [ν_t^n ∇²θ^n + ν_t^{n+1} ∇²θ^{n+1}]
-```
-
-## Validation and Testing
-
-### Turbulence Metrics
 ```bash
-# Test turbulence schemes
-python tests/validate_turbulence.py --scheme tke --resolution 50m
-
-# Compare SGS dissipation rates
-python tests/turbulence_diagnostics.py --case neutral_boundary_layer
+make bin/tornado_sim
+./bin/tornado_sim --headless --config=configs/physical_supercell.yaml --duration=1 --write-every=1 --outdir=/tmp/turbulence_smoke --log-profile quiet
+./bin/field_validator --input /tmp/turbulence_smoke --contract cm1 --mode strict --scope exported --json /tmp/turbulence_smoke/offline_validation.json
+make test-guards
+make test-backend-physics
 ```
 
-### Expected Behaviors
-- **Neutral conditions**: ν_t ∝ z^{4/3} (surface layer scaling)
-- **Stable stratification**: Reduced mixing, enhanced gradients
-- **Convective conditions**: Enhanced mixing, reduced gradients
-- **Energy cascade**: Proper dissipation at SGS scales
+Runtime safety behavior:
+- non-finite SGS tendency values are sanitized to zero in
+  `src/core/turbulence.cpp`
+- invalid turbulence config values are clamped/fallbacked at initialization
 
-## Performance Characteristics
+## Current Limitations
 
-### Computational Cost
-- **Smagorinsky**: ~2-5% of total simulation time
-- **TKE**: ~5-10% of total simulation time
-- **Memory**: Additional 3D arrays for TKE (prognostic schemes)
-
-### Scaling Properties
-- **Resolution dependence**: ν_t scales with Δ⁴ (Smagorinsky) or Δ² (TKE)
-- **Stability**: TKE schemes more stable for coarse grids
-- **Parallel efficiency**: Good scalability for distributed grids
-
-## Scientific References
-
-### Smagorinsky (1963)
-- Original eddy-viscosity formulation
-- Foundation for atmospheric SGS models
-- Lilly (1962) stability corrections
-
-### Deardorff (1980)
-- Prognostic TKE for boundary layers
-- Extension to convective conditions
-- Length scale formulations
-
-### Moeng (1984)
-- LES validation of SGS schemes
-- Turbulent channel flow benchmarks
-- Buoyancy effects on turbulence
-
-### Nakanishi (2001)
-- Mellor-Yamada level 2.5 adaptation
-- Atmospheric boundary layer optimization
-- Stability function improvements
-
-This module provides physically-based sub-grid scale mixing for convective storm simulations.
+- TKE diffusion is intentionally simple (vertical Laplacian contribution only),
+  not a full anisotropic flux-divergence closure.

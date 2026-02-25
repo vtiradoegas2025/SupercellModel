@@ -19,8 +19,8 @@ This document outlines the peer-reviewed literature foundations underlying the S
 - **3D Visualization**: Complete OpenGL volume ray marching pipeline
 
 #### Intentionally Simplified (Documented Gaps)
-- **Chaos/Stochastic Module**: Basic initial condition perturbations implemented; boundary layer and full stochastic schemes marked as "COMEBACK" for future development
-- **Terrain Module**: Bell and Schär mountain implementations exist but excluded from build due to compilation issues
+- **Chaos/Stochastic Module**: Initial-condition, boundary-layer, and full stochastic schemes are integrated; additional calibration/validation is still needed
+- **Terrain Module**: Bell and Schär mountain implementations are integrated in runtime; broader physics validation against reference cases is still needed
 
 #### **Grid Resolution**
 - **Production**: 256×128×128 grid (1km × 1km × 100m) — appropriate for convection-permitting supercell simulations
@@ -209,8 +209,8 @@ The codebase follows modern C++ practices with a modular factory pattern for phy
 - **Visualization**: 3D rendering of convective storm structures
 
 ### Future Development Priorities
-1. Complete the chaos/stochastic perturbation implementations
-2. Resolve terrain module compilation issues
+1. Expand chaos/stochastic calibration and ensemble validation workflows
+2. Extend terrain-science validation against reference idealized and real-case benchmarks
 3. Add more diagnostic outputs (helicity, vorticity, etc.)
 4. Performance optimization for larger domains
 5. Ensemble capability for uncertainty quantification

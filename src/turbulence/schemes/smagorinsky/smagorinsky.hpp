@@ -1,39 +1,51 @@
+/**
+ * @file smagorinsky.hpp
+ * @brief Declarations for the turbulence module.
+ *
+ * Defines interfaces, data structures, and contracts used by
+ * the turbulence runtime and scheme implementations.
+ * This file is part of the src/turbulence subsystem.
+ */
+
 #pragma once
-#include "../../base/eddy_viscosity.hpp"
+#include "turbulence/base/eddy_viscosity.hpp"
 #include "turbulence_base.hpp"
 
-/*This file contains the declaration of the Smagorinsky turbulence scheme.
-It manages the initialization of the Smagorinsky turbulence scheme and the computation of the Smagorinsky turbulence scheme.*/
 
+/**
+ * @brief Smagorinsky-Lilly turbulence closure with diagnostic eddy viscosity.
+ */
 class SmagorinskyScheme : public TurbulenceSchemeBase {
 private:
-    // Smagorinsky scheme parameters
-    double Cs_;              // Smagorinsky coefficient
-    double Pr_t_;            // turbulent Prandtl number
-    double Sc_t_;            // turbulent Schmidt number
-    double nu_t_max_;        // maximum eddy viscosity
-    double K_max_;           // maximum eddy diffusivity
+    double Cs_;
+    double Pr_t_;
+    double Sc_t_;
+    double nu_t_max_;
+    double K_max_;
 
-    // Computed fields
-    Field3D nu_t_;     // eddy viscosity
-    Field3D K_theta_;  // temperature diffusivity
-    Field3D K_q_;      // moisture diffusivity
+    Field3D nu_t_;
+    Field3D K_theta_;
+    Field3D K_q_;
 
 public:
-    /*This function initializes the Smagorinsky turbulence scheme.
-    Takes in the required fields and returns the required fields.*/
+    /**
+ * @brief Initializes the Smagorinsky turbulence scheme.
+ */
     SmagorinskyScheme();
 
-    /*This function gets the name of the Smagorinsky turbulence scheme.
-    Takes in the name and returns the name of the Smagorinsky turbulence scheme.*/
+    /**
+ * @brief Gets the name of the Smagorinsky turbulence scheme.
+ */
     std::string name() const override { return "smagorinsky"; }
 
-    /*This function gets the required fields.
-    Takes in the required fields and returns the required fields.*/
+    /**
+ * @brief Gets the required fields.
+ */
     int required_fields() const override;
 
-    /*This function initializes the Smagorinsky turbulence scheme.
-    Takes in the configuration and initializes the Smagorinsky turbulence scheme.*/
+    /**
+ * @brief Initializes the Smagorinsky turbulence scheme.
+ */
     void initialize(const TurbulenceConfig& cfg) override;
 
     void compute(
@@ -45,8 +57,9 @@ public:
 
 private:
 
-    /*This function computes the eddy coefficients.
-    Takes in the configuration, grid, and state and computes the eddy coefficients.*/
+    /**
+ * @brief Computes the eddy coefficients.
+ */
    
     void compute_eddy_coefficients(
         const TurbulenceConfig& cfg,
@@ -54,10 +67,12 @@ private:
         const TurbulenceStateView& state
     );
 
-    /*This function applies the stability correction.
-    Takes in the configuration, state, and the row, column, and level and applies the stability correction.*/
+    /**
+ * @brief Applies the stability correction.
+ */
     double apply_stability_correction(
         const TurbulenceConfig& cfg,
+        const GridMetrics& grid,
         const TurbulenceStateView& state,
         int i, int j, int k
     );

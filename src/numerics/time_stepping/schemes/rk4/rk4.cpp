@@ -1,17 +1,29 @@
+/**
+ * @file rk4.cpp
+ * @brief Implementation for the numerics module.
+ *
+ * Provides executable logic for the numerics runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/numerics subsystem.
+ */
+
 #include "rk4.hpp"
 #include <iostream>
+#include <stdexcept>
 
 RK4Scheme::RK4Scheme() : rhs_function_(nullptr) {}
 
-/*This function initializes the RK4 time stepping scheme.
-Takes in the configuration and initializes the RK4 time stepping scheme.*/
+/**
+ * @brief Initializes the RK4 time stepping scheme.
+ */
 void RK4Scheme::initialize() 
 {
     initialize(TimeSteppingConfig{}, nullptr);
 }
 
-/*This function initializes the RK4 time stepping scheme.
-Takes in the configuration and the right-hand side function and initializes the RK4 time stepping scheme.*/
+/**
+ * @brief Initializes the RK4 time stepping scheme.
+ */
 void RK4Scheme::initialize(const TimeSteppingConfig& cfg, RHSFunction rhs_func) 
 {
     config_ = cfg;
@@ -20,21 +32,20 @@ void RK4Scheme::initialize(const TimeSteppingConfig& cfg, RHSFunction rhs_func)
     std::cout << "Initialized RK4 time stepping scheme" << std::endl;
 }
 
-/*This function steps the RK4 time stepping scheme.
-Takes in the configuration, state, and diagnostics and steps the RK4 time stepping scheme.*/
+/**
+ * @brief Steps the RK4 time stepping scheme.
+ */
 void RK4Scheme::step(
     const TimeSteppingConfig& cfg,
     TimeSteppingState& state,
     TimeSteppingDiagnostics* diag_opt
 ) 
 {
-    // If the right-hand side function is not set, throw an error.
     if (!rhs_function_) 
     {
         throw std::runtime_error("RHS function not set for RK4 scheme");
     }
 
-    // If the stage storage is not set, resize the stage storage.
     if (stage1_.empty() || stage1_.size() != state.fields.size()) {
         stage1_.resize(state.fields.size());
         stage2_.resize(state.fields.size());
@@ -45,17 +56,14 @@ void RK4Scheme::step(
         k4_.resize(state.fields.size());
     }
 
-    // Compute RK4 stages
     compute_k1(state);
     compute_k2(state);
     compute_k3(state);
     compute_k4(state);
     update_final(state);
 
-    // Update time
     state.time += state.dt;
 
-    // If the diagnostics are requested, increment the number of steps and store the time step.
     if (diag_opt) 
     {
         diag_opt->n_steps++;
@@ -63,137 +71,133 @@ void RK4Scheme::step(
     }
 }
 
-/*This function suggests the time step.
-Takes in the configuration and state and suggests the time step.*/  
+/**
+ * @brief Suggests the time step.
+ */  
 double RK4Scheme::suggest_dt(
     const TimeSteppingConfig& cfg,
     const TimeSteppingState& state
 ) 
 {
-    // RK4 typically allows CFL ≈ 0.5-0.8 depending on the spatial scheme
-    return 0.5;  // Conservative estimate
+    return 0.5;
 }
 
-/*This function computes the first stage.
-Takes in the state and the tendencies and computes the first stage.*/
+/**
+ * @brief Computes the first stage.
+ */
 void RK4Scheme::compute_k1(const TimeSteppingState& state) 
 {
-    // k1 = L(q^n)
     rhs_function_(state.fields, state.time, k1_);
 }
 
-/*This function computes the second stage.
-Takes in the state and the tendencies and computes the second stage.*/
+/**
+ * @brief Computes the second stage.
+ */
 void RK4Scheme::compute_k2(const TimeSteppingState& state) 
 {
-    // q_temp = q^n + (Δt/2) * k1
     add_states(state.fields, 1.0, k1_, 0.5, state.dt, stage1_);
 
-    // k2 = L(q_temp)
     rhs_function_(stage1_, state.time + 0.5 * state.dt, k2_);
 }
 
-/*This function computes the third stage.
-Takes in the state and the tendencies and computes the third stage.*/
+/**
+ * @brief Computes the third stage.
+ */
 void RK4Scheme::compute_k3(const TimeSteppingState& state) 
 {
-    // q_temp = q^n + (Δt/2) * k2
     add_states(state.fields, 1.0, k2_, 0.5, state.dt, stage2_);
 
-    // k3 = L(q_temp)
     rhs_function_(stage2_, state.time + 0.5 * state.dt, k3_);
 }
 
 void RK4Scheme::compute_k4(const TimeSteppingState& state) {
-    // q_temp = q^n + Δt * k3
     add_states(state.fields, 1.0, k3_, 1.0, state.dt, stage3_);
 
-    // k4 = L(q_temp)
     rhs_function_(stage3_, state.time + state.dt, k4_);
 }
 
-/*This function updates the final stage.
-Takes in the state and updates the final stage.*/
+/**
+ * @brief Updates the final stage.
+ */
 void RK4Scheme::update_final(TimeSteppingState& state) 
 {
-    // q^{n+1} = q^n + (Δt/6) * (k1 + 2*k2 + 2*k3 + k4)
 
-    // Iterate over the fields and update the final stage.  
     for (size_t i = 0; i < state.fields.size(); ++i) 
     {
-
-        // Iterate over the vertical levels and update the final stage.
-        for (size_t k = 0; k < state.fields[i].data.size(); ++k) 
+        Field3D& values = state.fields[i].data;
+        const Field3D& k1 = k1_[i].tendencies;
+        const Field3D& k2 = k2_[i].tendencies;
+        const Field3D& k3 = k3_[i].tendencies;
+        const Field3D& k4 = k4_[i].tendencies;
+        if (values.size() != k1.size() || values.size() != k2.size() ||
+            values.size() != k3.size() || values.size() != k4.size())
         {
-            // Iterate over the horizontal columns and vertical levels and update the final stage.
-            for (size_t l = 0; l < state.fields[i].data[k].size(); ++l) 
-            {
-                // Iterate over the vertical levels and update the final stage.
-                for (size_t m = 0; m < state.fields[i].data[k][l].size(); ++m) 
-                {
-                    // Get the values of the first, second, third, and fourth stages.
-                    double k1_val = k1_[i].tendencies[k][l][m];
-                    double k2_val = k2_[i].tendencies[k][l][m];
-                    double k3_val = k3_[i].tendencies[k][l][m];
-                    double k4_val = k4_[i].tendencies[k][l][m];
+            throw std::runtime_error("RK4 update_final shape mismatch");
+        }
 
-                    state.fields[i].data[k][l][m] += (state.dt / 6.0) *
-                        (k1_val + 2.0 * k2_val + 2.0 * k3_val + k4_val);
-                }
-            }
+        float* out = values.data();
+        const float* k1_ptr = k1.data();
+        const float* k2_ptr = k2.data();
+        const float* k3_ptr = k3.data();
+        const float* k4_ptr = k4.data();
+        const std::size_t count = values.size();
+        for (std::size_t idx = 0; idx < count; ++idx)
+        {
+            const double updated =
+                static_cast<double>(out[idx]) +
+                (state.dt / 6.0) *
+                    (static_cast<double>(k1_ptr[idx]) +
+                     2.0 * static_cast<double>(k2_ptr[idx]) +
+                     2.0 * static_cast<double>(k3_ptr[idx]) +
+                     static_cast<double>(k4_ptr[idx]));
+            out[idx] = static_cast<float>(updated);
         }
     }
 }
 
-/*This function copies the state.
-Takes in the source and destination states and copies the state.*/
+/**
+ * @brief Copies the state.
+ */
 void RK4Scheme::copy_state(const std::vector<NumericalState>& src, std::vector<NumericalState>& dst) 
 {
-    // Resize the destination state.
     dst.resize(src.size());
 
-    // Iterate over the fields and copy the state.
     for (size_t i = 0; i < src.size(); ++i) 
     {
-        // Copy the data.
-        dst[i].data = src[i].data;  // Deep copy of 3D data
-        // Copy the name.
+        dst[i].data = src[i].data;
         dst[i].name = src[i].name;
     }
 }
 
-/*This function adds the states.
-Takes in the state1, the coefficient 1, the tendencies, the coefficient 2, the time step, 
-and the result and adds the states.*/
+/**
+ * @brief Adds the states.
+ */
 void RK4Scheme::add_states(const std::vector<NumericalState>& state1, double coef1,
                           const std::vector<NumericalTendencies>& tend, double coef2, double dt,
                           std::vector<NumericalState>& result) 
 {
     result.resize(state1.size());
 
-    // Iterate over the fields and add the states.
     for (size_t i = 0; i < state1.size(); ++i) 
     {
         result[i].name = state1[i].name;
-        result[i].data.resize(state1[i].data.size());
-
-        // Iterate over the vertical levels and add the states.
-        for (size_t k = 0; k < state1[i].data.size(); ++k) 
+        const Field3D& base = state1[i].data;
+        const Field3D& tendency = tend[i].tendencies;
+        if (base.size() != tendency.size())
         {
-            result[i].data[k].resize(state1[i].data[k].size());
+            throw std::runtime_error("RK4 add_states shape mismatch");
+        }
 
-            // Iterate over the horizontal columns and vertical levels and add the states.
-            for (size_t l = 0; l < state1[i].data[k].size(); ++l) 
-            {
-                result[i].data[k][l].resize(state1[i].data[k][l].size());
-
-                // Iterate over the vertical levels and add the states.
-                for (size_t m = 0; m < state1[i].data[k][l].size(); ++m) 
-                {
-                    result[i].data[k][l][m] = coef1 * state1[i].data[k][l][m] +
-                                            coef2 * dt * tend[i].tendencies[k][l][m];
-                }
-            }
+        result[i].data.resize(base.size_r(), base.size_th(), base.size_z(), 0.0f);
+        const float* base_ptr = base.data();
+        const float* tend_ptr = tendency.data();
+        float* out_ptr = result[i].data.data();
+        const std::size_t count = base.size();
+        for (std::size_t idx = 0; idx < count; ++idx)
+        {
+            out_ptr[idx] = static_cast<float>(
+                coef1 * static_cast<double>(base_ptr[idx]) +
+                coef2 * dt * static_cast<double>(tend_ptr[idx]));
         }
     }
 }

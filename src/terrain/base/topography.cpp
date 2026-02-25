@@ -1,80 +1,97 @@
+/**
+ * @file topography.cpp
+ * @brief Implementation for the terrain module.
+ *
+ * Provides executable logic for the terrain runtime path,
+ * including initialization, stepping, and diagnostics helpers.
+ * This file is part of the src/terrain subsystem.
+ */
+
 #include "topography.hpp"
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
-/*This file contains the implementation of the topography module.
-It manages the evaluation of the topography and the initialization of the topography.
-Commented out code is for the future and was having issues with the compilation. with 
-binary operator issues.*/
 
 namespace topography 
 {
 
-/*This function evaluates the bell topography.
-Takes in the x and y coordinates and the parameters and evaluates the bell topography.*/
+namespace
+{
+double sanitize_positive(double value, double fallback)
+{
+    if (!std::isfinite(value) || value <= terrain_constants::epsilon)
+    {
+        return fallback;
+    }
+    return value;
+}
+}
+
+/**
+ * @brief Evaluates the bell topography.
+ */
 BellResult eval_bell(double x, double y, const TerrainConfig::BellParams& params) 
 {
-    BellResult result;
+    BellResult result{0.0, 0.0, 0.0};
+    const double a = sanitize_positive(std::abs(params.a), 5000.0);
+    const double h0 = std::isfinite(params.h0) ? params.h0 : 0.0;
 
-    // If the topography is axisymmetric, evaluate the axisymmetric bell topography.
     if (params.axisymmetric) 
     {
-        // 3D axisymmetric bell: h(r) = h0 * a^3 / (a^2 + r^2)^{3/2}
         double r2 = x*x + y*y;
-        double denom = params.a*params.a + r2;
+        double denom = a*a + r2;
         double denom_32 = std::pow(denom, 1.5);
 
-        result.h = params.h0 * params.a*params.a*params.a / denom_32;
+        result.h = h0 * a*a*a / denom_32;
 
-        // If the denominator is not zero, evaluate the derivatives.
-        if (denom_32 > 1e-12) 
+        if (denom_32 > terrain_constants::epsilon) 
         {
-            double factor = -3.0 * params.h0 * params.a*params.a*params.a / std::pow(denom, 2.5);
+            double factor = -3.0 * h0 * a*a*a / std::pow(denom, 2.5);
             result.hx = factor * x;
             result.hy = factor * y;
         }
     } 
     else 
     {
-        // 2D ridge: h(x) = h0 / (1 + (x/a)^2)
-        double xa_ratio = x / params.a;
+        double xa_ratio = x / a;
         double denom = 1.0 + xa_ratio*xa_ratio;
 
-        result.h = params.h0 / denom;
+        result.h = h0 / denom;
 
-        // Derivative dh/dx
-        result.hx = -2.0 * params.h0 * xa_ratio / (params.a * denom*denom);
-        result.hy = 0.0;  // 2D ridge independent of y
+        result.hx = -2.0 * h0 * xa_ratio / (a * denom*denom);
+        result.hy = 0.0;
     }
 
     return result;
 }
 
-/*This function evaluates the Schär topography.
-Takes in the x coordinate and the parameters and evaluates the Schär topography.*/
+/**
+ * @brief Evaluates the Schär topography.
+ */
 ScharResult eval_schar(double x, const TerrainConfig::ScharParams& params) 
 {
-    ScharResult result;
+    ScharResult result{0.0, 0.0};
+    const double a = sanitize_positive(std::abs(params.a), 5000.0);
+    const double ell = sanitize_positive(std::abs(params.ell), 4000.0);
+    const double H = std::isfinite(params.H) ? params.H : 0.0;
 
-    // Schär mountain: h(x) = H * exp(-(x/a)^2) * cos^2(π*x/ℓ)
-    double xa_ratio = x / params.a;
+    double xa_ratio = x / a;
     double envelope = std::exp(-xa_ratio*xa_ratio);
-    double k = M_PI / params.ell;
+    double k = M_PI / ell;
     double cos_term = std::cos(k * x);
     double cos2_term = cos_term * cos_term;
 
-    result.h = params.H * envelope * cos2_term;
+    result.h = H * envelope * cos2_term;
 
-    // Derivative dh/dx
-    double d_envelope_dx = -2.0 * xa_ratio / params.a * envelope;
+    double d_envelope_dx = -2.0 * xa_ratio / a * envelope;
     double d_cos2_dx = -2.0 * k * cos_term * std::sin(k * x);
 
-    result.hx = params.H * (d_envelope_dx * cos2_term + envelope * d_cos2_dx);
+    result.hx = H * (d_envelope_dx * cos2_term + envelope * d_cos2_dx);
 
     return result;
 }
 
-// TerrainFollowingCoordinate methods
 TerrainFollowingCoordinate::TerrainFollowingCoordinate(const TerrainConfig& cfg, const Topography2D& topo)
     : config_(cfg), topography_(topo) 
 {
@@ -83,45 +100,39 @@ TerrainFollowingCoordinate::TerrainFollowingCoordinate(const TerrainConfig& cfg,
 double TerrainFollowingCoordinate::zeta_to_z(double zeta, int i, int j) const 
 {
     double h = topography_.h[i][j];
-    double ztop = config_.ztop;
+    double ztop = sanitize_positive(config_.ztop, 20000.0);
 
-    // If the coordinate id is "btf", evaluate the basic terrain-following.
     if (config_.coord_id == "btf") 
     {
-        // Basic terrain-following: z = ζ + h * (1 - ζ/ztop)
         return zeta + h * (1.0 - zeta / ztop);
     }
-    // If the coordinate id is "smoothed", evaluate the smoothed coordinate surfaces.
     else if (config_.coord_id == "smoothed") 
     {
-        // Smoothed coordinate surfaces
         double h_eff = apply_coordinate_smoothing(h, zeta);
         return zeta + h_eff * (1.0 - zeta / ztop);
     } 
     else 
     {
-        // Default to Cartesian
         return zeta;
     }
 }
 
-/*This function converts the z coordinate to the zeta coordinate.*/
+/**
+ * @brief Converts the z coordinate to the zeta coordinate.
+ */
 double TerrainFollowingCoordinate::z_to_zeta(double z, int i, int j) const 
 {
     double h = topography_.h[i][j];
-    double ztop = config_.ztop;
+    double ztop = sanitize_positive(config_.ztop, 20000.0);
 
     if (config_.coord_id == "btf") {
-        // Basic terrain-following: ζ = ztop * (z - h) / (ztop - h)
         if (std::abs(ztop - h) > terrain_constants::epsilon) {
             return ztop * (z - h) / (ztop - h);
         } else {
-            return z;  // degenerate case
+            return z;
         }
     } else if (config_.coord_id == "smoothed") {
-        // Smoothed coordinate surfaces (inverse mapping)
-        // This is approximate - full inverse would need iterative solution
-        double h_eff_avg = h * 0.5;  // simplified
+        double h_eff_avg = h * 0.5;
         if (std::abs(ztop - h_eff_avg) > terrain_constants::epsilon) {
             return ztop * (z - h_eff_avg) / (ztop - h_eff_avg);
         } else {
@@ -129,7 +140,7 @@ double TerrainFollowingCoordinate::z_to_zeta(double z, int i, int j) const
         }
     } 
     else {
-        return z;  // Cartesian
+        return z;
     }
 }
 
@@ -139,21 +150,16 @@ void TerrainFollowingCoordinate::compute_metrics(double zeta, int i, int j,
     double h = topography_.h[i][j];
     double hx = topography_.hx.empty() ? 0.0 : topography_.hx[i][j];
     double hy = topography_.hy.empty() ? 0.0 : topography_.hy[i][j];
-    double ztop = config_.ztop;
+    double ztop = sanitize_positive(config_.ztop, 20000.0);
 
-    // If the coordinate id is "btf", evaluate the basic terrain-following metrics. 
     if (config_.coord_id == "btf")
     {
-        // Basic terrain-following metrics
         z_out = zeta + h * (1.0 - zeta/ztop);
 
-        // Jacobian dz/dζ
         J = 1.0 - h/ztop;
 
-        // Metric terms
         double zeta_factor = 1.0 - zeta/ztop;
 
-        // If the Jacobian is not zero, evaluate the metric terms.
         if (std::abs(J) > terrain_constants::epsilon) 
         {
             mx = -zeta_factor * hx / J;
@@ -165,11 +171,9 @@ void TerrainFollowingCoordinate::compute_metrics(double zeta, int i, int j,
             my = 0.0;
         }
     }
-    // If the coordinate id is "smoothed", evaluate the smoothed coordinate surfaces.   
     else if (config_.coord_id == "smoothed") {
-        // Smoothed coordinate surfaces (simplified)
         double h_eff = apply_coordinate_smoothing(h, zeta);
-        double hx_eff = hx;  // simplified - would need proper smoothing
+        double hx_eff = hx;
         double hy_eff = hy;
 
         z_out = zeta + h_eff * (1.0 - zeta/ztop);
@@ -185,7 +189,6 @@ void TerrainFollowingCoordinate::compute_metrics(double zeta, int i, int j,
             my = 0.0;
         }
     } else {
-        // Cartesian coordinates
         z_out = zeta;
         J = 1.0;
         mx = 0.0;
@@ -195,13 +198,17 @@ void TerrainFollowingCoordinate::compute_metrics(double zeta, int i, int j,
 
 double TerrainFollowingCoordinate::apply_coordinate_smoothing(double h, double zeta) const 
 {
-    // Exponential decay of terrain influence with height
-    double decay_factor = std::exp(-config_.smoothing_decay * zeta / config_.ztop);
+    const double ztop = sanitize_positive(config_.ztop, 20000.0);
+    const double decay_rate = std::isfinite(config_.smoothing_decay)
+        ? std::max(0.0, config_.smoothing_decay)
+        : 0.1;
+    double decay_factor = std::exp(-decay_rate * zeta / ztop);
     return h * decay_factor;
 }
 
-/*This function initializes the topography.
-Takes in the topography and the number of rows and columns and initializes the topography.*/
+/**
+ * @brief Initializes the topography.
+ */
 
 void initialize_topography(Topography2D& topo, int NR, int NTH) 
 {
@@ -210,59 +217,71 @@ void initialize_topography(Topography2D& topo, int NR, int NTH)
     topo.hy.assign(NR, std::vector<double>(NTH, 0.0));
 }
 
-/*This function initializes the metrics.
-Takes in the metrics and the number of rows and columns and initializes the metrics.*/
+/**
+ * @brief Initializes the metrics.
+ */
 void initialize_metrics(TerrainMetrics3D& metrics, int NR, int NTH, int NZ) 
 {
-    metrics.z.assign(NR, std::vector<std::vector<double>>(NTH, std::vector<double>(NZ, 0.0)));
-    metrics.J.assign(NR, std::vector<std::vector<double>>(NTH, std::vector<double>(NZ, 1.0)));
-    metrics.mx.assign(NR, std::vector<std::vector<double>>(NTH, std::vector<double>(NZ, 0.0)));
-    metrics.my.assign(NR, std::vector<std::vector<double>>(NTH, std::vector<double>(NZ, 0.0)));
-    metrics.zeta.assign(NR, std::vector<std::vector<double>>(NTH, std::vector<double>(NZ, 0.0)));
+    metrics.z.resize(NR, NTH, NZ, 0.0);
+    metrics.J.resize(NR, NTH, NZ, 1.0);
+    metrics.mx.resize(NR, NTH, NZ, 0.0);
+    metrics.my.resize(NR, NTH, NZ, 0.0);
+    metrics.zeta.resize(NR, NTH, NZ, 0.0);
 }
 
-/*This function builds the zeta levels.
-Takes in the number of levels and the top of the domain and builds the zeta levels.*/
+/**
+ * @brief Builds the zeta levels.
+ */
 std::vector<double> build_zeta_levels(int NZ, double ztop) 
 {
-    std::vector<double> zeta(NZ);
+    if (NZ <= 0)
+    {
+        return {};
+    }
 
-    // Iterate over the vertical levels and build the zeta levels.
+    std::vector<double> zeta(NZ, 0.0);
+    const double ztop_safe = sanitize_positive(ztop, 20000.0);
+
+    if (NZ == 1)
+    {
+        return zeta;
+    }
+
     for (int k = 0; k < NZ; ++k) 
     {
-        zeta[k] = k * ztop / (NZ - 1);  // uniform spacing
+        zeta[k] = k * ztop_safe / (NZ - 1);
     }
     return zeta;
 }
 
-/*This function checks the coordinate validity.
-Takes in the metrics and the diagnostics and checks the coordinate validity.*/
+/**
+ * @brief Checks the coordinate validity.
+ */
 bool check_coordinate_validity(const TerrainMetrics3D& metrics, TerrainDiagnostics& diag) 
 {
-    const int NR = metrics.J.size();
-    const int NTH = NR > 0 ? metrics.J[0].size() : 0;
-    const int NZ = NTH > 0 ? metrics.J[0][0].size() : 0;
+    const int NR = metrics.J.size_r();
+    const int NTH = metrics.J.size_th();
+    const int NZ = metrics.J.size_z();
 
-    diag.min_jacobian = 1e6;
-    diag.max_jacobian = -1e6;
+    diag.min_jacobian = std::numeric_limits<double>::infinity();
+    diag.max_jacobian = -std::numeric_limits<double>::infinity();
     diag.coordinate_folding = false;
     diag.warnings.clear();
 
-    // Iterate over the rows, columns, and levels and check the coordinate validity.
     for (int i = 0; i < NR; ++i) 
     {
-        // Iterate over the columns and check the coordinate validity.
         for (int j = 0; j < NTH; ++j) 
         {
-            // Iterate over the levels and check the coordinate validity.
             for (int k = 0; k < NZ; ++k) 
             {
-                double J = metrics.J[i][j][k];
-                diag.min_jacobian = std::min(diag.min_jacobian, J);
-                diag.max_jacobian = std::max(diag.max_jacobian, J);
+                double J = metrics.J(i, j, k);
+                if (std::isfinite(J))
+                {
+                    diag.min_jacobian = std::min(diag.min_jacobian, J);
+                    diag.max_jacobian = std::max(diag.max_jacobian, J);
+                }
 
-                // If the Jacobian is less than or equal to the epsilon, set the coordinate folding to true.
-                if (J <= terrain_constants::epsilon) 
+                if (!std::isfinite(J) || J <= terrain_constants::epsilon) 
                 {
                     diag.coordinate_folding = true;
                     diag.warnings.push_back("Coordinate folding detected at (i,j,k)=(" +
@@ -273,7 +292,16 @@ bool check_coordinate_validity(const TerrainMetrics3D& metrics, TerrainDiagnosti
         }
     }
 
+    if (!std::isfinite(diag.min_jacobian))
+    {
+        diag.min_jacobian = 1.0;
+    }
+    if (!std::isfinite(diag.max_jacobian))
+    {
+        diag.max_jacobian = 1.0;
+    }
+
     return !diag.coordinate_folding;
 }
 
-} // namespace topography
+}
