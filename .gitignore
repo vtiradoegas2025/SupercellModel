@@ -22,11 +22,7 @@ venv/
 /test_*.sh
 *_test.py
 *_tests.py
-tests/debug_sim
-tests/__pycache__/
-tests/.pytest_cache/
-tests/*.tmp
-tests/*.log
+tests/
 
 # macOS
 .DS_Store
